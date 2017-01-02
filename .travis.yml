@@ -5,6 +5,6 @@ env:
 - SWIFT_VERSION=swift-3.0.2-RELEASE
 install:
 - mkdir swift
-- curl https://swift.org/builds/ubuntu1404/$SWIFT_VERSION/$SWIFT_VERSION-ubuntu14.04.tar.gz -s | tar xz -C swift &> /dev/null
+- curl https://swift.org/builds/$SWIFT_VERSION/ubuntu1404/$SWIFT_VERSION/$SWIFT_VERSION-ubuntu14.04.tar.gz -s | tar xz -C swift &> /dev/null
 script:
 - env PATH=$(pwd)/swift/$SWIFT_VERSION-ubuntu14.04/usr/bin:$PATH swift build

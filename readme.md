@@ -12,7 +12,7 @@
 
 SwiftXML exposes just two objects — a protocol and a function:
 
-```swift3
+```swift
 protocol Parser
 {
     func handle_data(data:[UnicodeScalar])
@@ -23,7 +23,7 @@ protocol Parser
 }
 ```
 
-```swift3
+```swift
 func parse(_:String, parser:Parser)
 ```
 

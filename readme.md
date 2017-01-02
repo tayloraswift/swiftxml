@@ -6,13 +6,13 @@
 )](https://github.com/kelvin13/swiftxml/issues?state=open)
 [![License](https://img.shields.io/badge/license-GPL3-ff3079.svg)](https://github.com/kelvin13/swiftxml/blob/master/LICENSE.gpl3)
 [![Build](https://travis-ci.org/kelvin13/swiftxml.svg?branch=master)](https://travis-ci.org/kelvin13/swiftxml)
-[![](https://img.shields.io/badge/taylor-swift-e030ff.svg)]
+[![Queen](https://img.shields.io/badge/taylor-swift-e030ff.svg)](https://github.com/kelvin13/swiftxml)
 
 **Lightweight XML parsing in *pure* Swift 3. No Foundation. No dependencies.**
 
 SwiftXML exposes just two objects — a protocol and a function:
 
-```
+```swift3
 protocol Parser
 {
     func handle_data(data:[UnicodeScalar])
@@ -23,7 +23,7 @@ protocol Parser
 }
 ```
 
-```
+```swift3
 func parse(_:String, parser:Parser)
 ```
 

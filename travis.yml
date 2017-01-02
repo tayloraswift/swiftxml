@@ -1,0 +1,10 @@
+language: generic
+sudo: required
+dist: yakkety
+env:
+- SWIFT_VERSION=swift-DEVELOPMENT-SNAPSHOT-2016-12-15-a
+install:
+- mkdir swift
+- curl https://swift.org/builds/development/ubuntu1610/$SWIFT_VERSION/$SWIFT_VERSION-ubuntu16.10.tar.gz -s | tar xz -C swift &> /dev/null
+script:
+- env PATH=$(pwd)/swift/$SWIFT_VERSION-ubuntu16.10/usr/bin:$PATH swift build

@@ -1,6 +1,6 @@
 # SwiftXML
 
-[![Language](http://img.shields.io/badge/language-swift-brightgreen.svg?style=flat
+[![Language](https://img.shields.io/badge/language-swift-ffa020.svg
 )](https://developer.apple.com/swift)
 [![Issues](https://img.shields.io/github/issues/kelvin13/swiftxml.svg
 )](https://github.com/kelvin13/swiftxml/issues?state=open)

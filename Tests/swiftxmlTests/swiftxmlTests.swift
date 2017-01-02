@@ -67,9 +67,9 @@ class HTMLParser: Parser
     {
         self.output.append(.close(name: name))
     }
-    func error(_ message:String, l:Int, k:Int)
+    func error(_ message:String, line:Int, column:Int)
     {
-        self.output.append(.error(message, l, k))
+        self.output.append(.error(message, line, column))
     }
 }
 

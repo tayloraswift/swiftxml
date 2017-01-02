@@ -1,14 +1,33 @@
+/*
+    Copyright 2017, Kelvin Ma, kelvinsthirteen@gmail.com
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+public
 protocol Parser
 {
     func handle_data(data:[UnicodeScalar])
     func handle_starttag(name:String, attributes:[String: String])
     func handle_startendtag(name:String, attributes:[String: String])
     func handle_endtag(name:String)
-    func error(_ message:String, l:Int, k:Int)
+    func error(_ message:String, line:Int, column:Int)
 }
 
 // NameStartChar  ::=   ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
 
+private
 func _is_NSC(_ us:UnicodeScalar) -> Bool
 {
     let u:UInt32 = us.value
@@ -19,6 +38,7 @@ func _is_NSC(_ us:UnicodeScalar) -> Bool
 
 // NameChar       ::=   NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
 
+private
 func _is_NC(_ us:UnicodeScalar) -> Bool
 {
     let u:UInt32 = us.value
@@ -30,6 +50,8 @@ func _is_NC(_ us:UnicodeScalar) -> Bool
 }
 
 // S	   ::=   	(#x20 | #x9 | #xD | #xA)+
+
+private
 func _is_whitespace(_ us:UnicodeScalar) -> Bool
 {
     return us == "\u{20}" || us == "\u{9}" || us == "\u{D}" || us == "\u{A}"
@@ -51,6 +73,7 @@ enum _Emission
     case initial, start, start_end, end, empty(String, Int, Int), dropped(Int, Int), comment
 }
 
+public
 func parse(_ doc:String, parser:Parser)
 {
     var data_buffer:[UnicodeScalar] = []
@@ -80,9 +103,9 @@ func parse(_ doc:String, parser:Parser)
         case .end:
             parser.handle_endtag(name: name_buffer)
         case let .empty(kind, l_1, k_1):
-            parser.error("empty tag '\(kind)' ignored", l: l_1, k: k_1)
+            parser.error("empty tag '\(kind)' ignored", line: l_1, column: k_1)
         case let .dropped(l_1, k_1):
-            parser.error("invalid tag '\(name_buffer)' dropped", l: l_1, k: k_1)
+            parser.error("invalid tag '\(name_buffer)' dropped", line: l_1, column: k_1)
         case .comment:
             break
         }
@@ -227,7 +250,7 @@ func parse(_ doc:String, parser:Parser)
             }
             else if u == ">"
             {
-                parser.error("unexpected '>' after \(context)", l: l, k: k)
+                parser.error("unexpected '>' after \(context)", line: l, column: k)
                 state = .emit( is_end_tag ? .end : .start )
             }
             else
@@ -241,7 +264,7 @@ func parse(_ doc:String, parser:Parser)
             }
             else if u == ">"
             {
-                parser.error("unexpected '>' after \(context)", l: l, k: k)
+                parser.error("unexpected '>' after \(context)", line: l, column: k)
                 state = .emit( is_end_tag ? .end : .start )
             }
             else if !_is_whitespace(u)
@@ -260,7 +283,7 @@ func parse(_ doc:String, parser:Parser)
             }
             else if u == ">"
             {
-                parser.error("unexpected '>' after '=' on \(context)", l: l, k: k)
+                parser.error("unexpected '>' after '=' on \(context)", line: l, column: k)
                 state = .emit( is_end_tag ? .end : .start )
             }
             else
@@ -275,7 +298,7 @@ func parse(_ doc:String, parser:Parser)
             }
             else if u == ">"
             {
-                parser.error("unexpected '>' after '=' on \(context)", l: l, k: k)
+                parser.error("unexpected '>' after '=' on \(context)", line: l, column: k)
                 state = .emit( is_end_tag ? .end : .start )
             }
             else if !_is_whitespace(u)
@@ -318,7 +341,7 @@ func parse(_ doc:String, parser:Parser)
             {
                 if is_end_tag
                 {
-                    parser.error("end tag '\(name_buffer)' cannot contain attributes", l: l, k: k)
+                    parser.error("end tag '\(name_buffer)' cannot contain attributes", line: l, column: k)
                     state = .emit( .end )
                 }
                 else
@@ -352,7 +375,7 @@ func parse(_ doc:String, parser:Parser)
             assert(unexpected_str_delim == nil)
             if U == "\"" || U == "'"
             {
-                parser.error("unexpected string literal in tag '\(name_buffer)'", l: l_1, k: k_1)
+                parser.error("unexpected string literal in tag '\(name_buffer)'", line: l_1, column: k_1)
                 if u != U
                 {
                  unexpected_str_delim = U
@@ -361,7 +384,7 @@ func parse(_ doc:String, parser:Parser)
             }
             else
             {
-                parser.error("invalid character '\(U)' in tag '\(name_buffer)'", l: l_1, k: k_1)
+                parser.error("invalid character '\(U)' in tag '\(name_buffer)'", line: l_1, column: k_1)
                 if u == ">"
                 {
                     state = .emit( .dropped(l, k) )
@@ -466,6 +489,6 @@ func parse(_ doc:String, parser:Parser)
         data_buffer.append(U)
         parser.handle_data(data: data_buffer)
     default:
-        parser.error("unexpected EOF", l: l, k: k)
+        parser.error("unexpected EOF", line: l, column: k)
     }
 }

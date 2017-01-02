@@ -1,16 +1,10 @@
 language: generic
 sudo: required
-dist: yakkety
+dist: trusty
 env:
-- SWIFT_VERSION=swift-DEVELOPMENT-SNAPSHOT-2016-12-15-a
+- SWIFT_VERSION=swift-3.0.2-RELEASE
 install:
 - mkdir swift
-- curl https://swift.org/builds/development/ubuntu1610/$SWIFT_VERSION/$SWIFT_VERSION-ubuntu16.10.tar.gz -s | tar xz -C swift &> /dev/null
+- curl https://swift.org/builds/ubuntu1404/$SWIFT_VERSION/$SWIFT_VERSION-ubuntu14.04.tar.gz -s | tar xz -C swift &> /dev/null
 script:
-- env PATH=$(pwd)/swift/$SWIFT_VERSION-ubuntu16.10/usr/bin:$PATH swift build
-addons:
-  apt:
-    sources:
-      - ubuntu-toolchain-r-test
-    packages:
-      - libstdc++-4.9-dev
+- env PATH=$(pwd)/swift/$SWIFT_VERSION-ubuntu14.04/usr/bin:$PATH swift build

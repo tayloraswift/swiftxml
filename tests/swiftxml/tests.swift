@@ -59,15 +59,15 @@ class HTMLParser:Parser
     {
         self.output.append(.data(data.map{String($0)}.joined()))
     }
-    func handle_starttag(name:String, attributes:[String: String], level _:Int)
+    func handle_starttag(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
     {
         self.output.append(.open(name: name, is_sc: false, attrs: attributes))
     }
-    func handle_startendtag(name:String, attributes:[String: String], level _:Int)
+    func handle_startendtag(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
     {
         self.output.append(.open(name: name, is_sc: true, attrs: attributes))
     }
-    func handle_endtag(name:String, level _:Int)
+    func handle_endtag(name:String, namespace_uri _:String?, level _:Int)
     {
         self.output.append(.close(name: name))
     }

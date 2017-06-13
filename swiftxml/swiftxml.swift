@@ -19,9 +19,9 @@ public
 protocol Parser
 {
     func handle_data(data:[Unicode.Scalar], level:Int)
-    func handle_starttag(name:String, attributes:[String: String], level:Int)
-    func handle_startendtag(name:String, attributes:[String: String], level:Int)
-    func handle_endtag(name:String, level:Int)
+    func handle_starttag(name:String, namespace_uri:String?, attributes:[String: String], level:Int)
+    func handle_startendtag(name:String, namespace_uri:String?, attributes:[String: String], level:Int)
+    func handle_endtag(name:String, namespace_uri:String?, level:Int)
     func error(_ message:String, line:Int, column:Int)
 }
 
@@ -95,8 +95,12 @@ func parse(_ doc:String, parser:Parser)
         str_buffer:String            = "",
         label_buffer:String          = "",
         name_buffer:String           = "",
-        attributes:[String: String]  = [:],
-        stack_level:Int              = 0
+        name_prefix:String?          = nil,
+        attributes:[String: String]  = [:]
+
+    var stack_level:Int                       = 0,
+        namespaces:[(name:String, level:Int)] = [],
+        namespace_uris:[String: [String]]       = [:]
 
     var context:String
     {
@@ -109,18 +113,68 @@ func parse(_ doc:String, parser:Parser)
     @inline(__always)
     func _emit_tag(_ angle_bracket_group:AngleBracketGroup)
     {
+        var namespace_uri:String?
+        {
+            if let name_prefix = name_prefix
+            {
+                return namespace_uris[name_prefix]?.last
+            }
+            else
+            {
+                return nil
+            }
+        }
+
         switch angle_bracket_group
         {
         case .initial:
             break
         case .start:
-            parser.handle_starttag(name: name_buffer, attributes: attributes, level: stack_level)
+            // look for namespace declarations
+            for (attribute, value):(String, String) in attributes
+            {
+                guard let first_colon:String.CharacterView.Index = attribute.index(of: ":")
+                else
+                {
+                    continue
+                }
+                guard attribute[..<first_colon] == "xmlns"
+                else
+                {
+                    continue
+                }
+
+            let namespace:String = String(attribute[attribute.index(after: first_colon)...])
+                namespaces.append((name: namespace, level: stack_level + 1))
+                if namespace_uris[namespace]?.append(value) == nil
+                {
+                    namespace_uris[namespace] = [value]
+                }
+            }
+
+            parser.handle_starttag(name: name_buffer, namespace_uri: namespace_uri, attributes: attributes, level: stack_level)
             stack_level += 1
         case .start_end:
-            parser.handle_startendtag(name: name_buffer, attributes: attributes, level: stack_level)
+            parser.handle_startendtag(name: name_buffer, namespace_uri: namespace_uri, attributes: attributes, level: stack_level)
         case .end:
-            parser.handle_endtag(name: name_buffer, level: stack_level)
             stack_level -= 1
+            parser.handle_endtag(name: name_buffer, namespace_uri: namespace_uri, level: stack_level)
+
+            for (namespace, level):(String, Int) in namespaces.reversed()
+            {
+                guard level > stack_level
+                else
+                {
+                    break
+                }
+
+                namespace_uris[namespace]?.removeLast()
+                if namespace_uris[namespace]?.isEmpty ?? false
+                {
+                    namespace_uris[namespace] = nil
+                }
+            }
+
         case let .empty(kind, l, k):
             parser.error("empty tag '\(kind)' ignored", line: l, column: k)
         case let .dropped(l, k):
@@ -144,6 +198,7 @@ func parse(_ doc:String, parser:Parser)
 
             label_buffer = ""
             name_buffer = ""
+            name_prefix = nil
             attributes = [:]
 
             if u == "<"
@@ -205,6 +260,11 @@ func parse(_ doc:String, parser:Parser)
                 state = .invalid1(u, l, k)
             }
         case .name_save(let u_previous):
+            if u_previous == ":"
+            {
+                name_prefix = name_prefix ?? name_buffer
+            }
+
             name_buffer.append(Character(u_previous))
             if u.is_xml_name
             {
@@ -254,6 +314,7 @@ func parse(_ doc:String, parser:Parser)
             }
         case .label(let u_previous):
             label_buffer.append(Character(u_previous))
+
             if u.is_xml_name
             {
                 state = .label(u)

@@ -1,4 +1,4 @@
-@testable import swiftxmlTests
+import XMLTests
 
 let test_cases:[(String, [Token])] =
 [

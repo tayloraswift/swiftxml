@@ -84,6 +84,14 @@ enum State
     case emit(AngleBracketGroup)
 }
 
+enum StateContext
+{
+    case none,
+         angle,
+         angle_slash,
+         angle_question
+}
+
 enum AngleBracketGroup
 {
     case initial,
@@ -261,7 +269,7 @@ extension XMLParser
         }
 
         var state:State = .emit(.initial)
-        var inside_end_tag:Bool = false
+        var enclosure:StateContext = .none
         var expected_str_delim:Unicode.Scalar = "\0"
         var unexpected_str_delim:Unicode.Scalar? = nil
 
@@ -273,9 +281,10 @@ extension XMLParser
                 _emit_tag(angle_bracket_group)
 
                 label_buffer = ""
-                name_buffer = ""
-                name_prefix = nil
-                attributes = [:]
+                name_buffer  = ""
+                name_prefix  = nil
+                attributes   = [:]
+                enclosure    = .none
 
                 if u == "<"
                 {
@@ -298,8 +307,7 @@ extension XMLParser
                     state = .outer_save(u)
                 }
             case .tag:
-                inside_end_tag = false
-
+                enclosure = .angle
                 if u.is_xml_name_start
                 {
                     state = .name_save(u)
@@ -321,7 +329,7 @@ extension XMLParser
                     state = .invalid1(u, l, k)
                 }
             case .e_tag:
-                inside_end_tag = true
+                enclosure = .angle_slash
 
                 if u.is_xml_name_start
                 {
@@ -350,13 +358,13 @@ extension XMLParser
                 {
                     state = .ignore1
                 }
-                else if !inside_end_tag && u == "/"
+                else if enclosure == .angle && u == "/"
                 {
                     state = .se_tag
                 }
                 else if u == ">"
                 {
-                    state = .emit(inside_end_tag ? .end : .start)
+                    state = .emit(enclosure == .angle_slash ? .end : .start)
                 }
                 else
                 {
@@ -367,13 +375,13 @@ extension XMLParser
                 {
                     state = .label(u)
                 }
-                else if !inside_end_tag && u == "/"
+                else if enclosure == .angle && u == "/"
                 {
                     state = .se_tag
                 }
                 else if u == ">"
                 {
-                    state = .emit(inside_end_tag ? .end : .start)
+                    state = .emit(enclosure == .angle_slash ? .end : .start)
                 }
                 else if !u.is_xml_whitespace
                 {
@@ -406,7 +414,7 @@ extension XMLParser
                 else if u == ">"
                 {
                     self.handle_error("unexpected '>' after \(_context())", line: l, column: k)
-                    state = .emit(inside_end_tag ? .end : .start)
+                    state = .emit(enclosure == .angle_slash ? .end : .start)
                 }
                 else
                 {
@@ -420,7 +428,7 @@ extension XMLParser
                 else if u == ">"
                 {
                     self.handle_error("unexpected '>' after \(_context())", line: l, column: k)
-                    state = .emit(inside_end_tag ? .end : .start)
+                    state = .emit(enclosure == .angle_slash ? .end : .start)
                 }
                 else if !u.is_xml_whitespace
                 {
@@ -439,7 +447,7 @@ extension XMLParser
                 else if u == ">"
                 {
                     self.handle_error("unexpected '>' after '=' on \(_context())", line: l, column: k)
-                    state = .emit(inside_end_tag ? .end : .start)
+                    state = .emit(enclosure == .angle_slash ? .end : .start)
                 }
                 else
                 {
@@ -454,7 +462,7 @@ extension XMLParser
                 else if u == ">"
                 {
                     self.handle_error("unexpected '>' after '=' on \(_context())", line: l, column: k)
-                    state = .emit(inside_end_tag ? .end : .start)
+                    state = .emit(enclosure == .angle_slash ? .end : .start)
                 }
                 else if !u.is_xml_whitespace
                 {
@@ -487,13 +495,13 @@ extension XMLParser
                 {
                     state = .ignore4
                 }
-                else if !inside_end_tag && u == "/"
+                else if enclosure != .angle_slash && u == "/"
                 {
                     state = .se_tag
                 }
                 else if u == ">"
                 {
-                    if inside_end_tag
+                    if enclosure == .angle_slash
                     {
                         self.handle_error("end tag '\(name_buffer)' cannot contain attributes", line: l, column: k)
                         state = .emit(.end)
@@ -516,7 +524,7 @@ extension XMLParser
                 {
                     state = .label(u)
                 }
-                else if !inside_end_tag && u == "/"
+                else if enclosure == .angle && u == "/"
                 {
                     state = .se_tag
                 }

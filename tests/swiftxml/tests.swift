@@ -134,6 +134,7 @@ func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true) 
     t0 = clock()
     test_parser.parse(path: "tests/gl.xml")
     print("time: \(clock() - t0)")
+    print(test_parser.output[0 ... 3])
     print(test_parser.output.count)
 
     if !test_cases.isEmpty

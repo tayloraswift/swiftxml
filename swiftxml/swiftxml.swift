@@ -18,10 +18,10 @@
 public
 protocol Parser
 {
-    func handle_data(data:[Unicode.Scalar])
-    func handle_starttag(name:String, attributes:[String: String])
-    func handle_startendtag(name:String, attributes:[String: String])
-    func handle_endtag(name:String)
+    func handle_data(data:[Unicode.Scalar], level:Int)
+    func handle_starttag(name:String, attributes:[String: String], level:Int)
+    func handle_startendtag(name:String, attributes:[String: String], level:Int)
+    func handle_endtag(name:String, level:Int)
     func error(_ message:String, line:Int, column:Int)
 }
 
@@ -43,7 +43,6 @@ extension Unicode.Scalar
         || "\u{3001}" ... "\u{D7FF}" ~= self || "\u{F900}" ... "\u{FDCF}" ~= self
         || "\u{FDF0}" ... "\u{FFFD}" ~= self || "\u{10000}" ... "\u{EFFFF}" ~= self
     }
-
 
     // NameChar       ::=   NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
     var is_xml_name:Bool
@@ -96,7 +95,8 @@ func parse(_ doc:String, parser:Parser)
         str_buffer:String            = "",
         label_buffer:String          = "",
         name_buffer:String           = "",
-        attributes:[String: String]  = [:]
+        attributes:[String: String]  = [:],
+        stack_level:Int              = 0
 
     var context:String
     {
@@ -114,11 +114,13 @@ func parse(_ doc:String, parser:Parser)
         case .initial:
             break
         case .start:
-            parser.handle_starttag(name: name_buffer, attributes: attributes)
+            parser.handle_starttag(name: name_buffer, attributes: attributes, level: stack_level)
+            stack_level += 1
         case .start_end:
-            parser.handle_startendtag(name: name_buffer, attributes: attributes)
+            parser.handle_startendtag(name: name_buffer, attributes: attributes, level: stack_level)
         case .end:
-            parser.handle_endtag(name: name_buffer)
+            parser.handle_endtag(name: name_buffer, level: stack_level)
+            stack_level -= 1
         case let .empty(kind, l, k):
             parser.error("empty tag '\(kind)' ignored", line: l, column: k)
         case let .dropped(l, k):
@@ -140,7 +142,6 @@ func parse(_ doc:String, parser:Parser)
         case .emit(let angle_bracket_group):
             _emit_tag(angle_bracket_group)
 
-            str_buffer = ""
             label_buffer = ""
             name_buffer = ""
             attributes = [:]
@@ -158,7 +159,7 @@ func parse(_ doc:String, parser:Parser)
             if u == "<"
             {
                 state = .tag
-                parser.handle_data(data: data_buffer)
+                parser.handle_data(data: data_buffer, level: stack_level)
                 data_buffer = []
             }
             else
@@ -323,7 +324,6 @@ func parse(_ doc:String, parser:Parser)
                 state = .invalid1(u, l, k)
             }
         case .string:
-            assert(str_buffer == "")
             if u == expected_str_delim
             {
                 state = .store_attrib
@@ -503,7 +503,7 @@ func parse(_ doc:String, parser:Parser)
         _emit_tag(angle_bracket_group)
     case .outer_save(let u_last):
         data_buffer.append(u_last)
-        parser.handle_data(data: data_buffer)
+        parser.handle_data(data: data_buffer, level: stack_level)
     default:
         parser.error("unexpected EOF", line: l, column: k)
     }

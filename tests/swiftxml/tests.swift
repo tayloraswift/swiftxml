@@ -7,13 +7,13 @@ func _print_attributes(_ attributes:[String: String]) -> String
     return "{\(internal_str)}"
 }
 
-public 
+public
 enum Token: Equatable, CustomStringConvertible
 {
     case open(name:String, is_sc:Bool, attrs:[String: String])
     case close(name:String), error(String, Int, Int), data(String)
-    
-    public 
+
+    public
     static func == (lhs:Token, rhs:Token) -> Bool
     {
         switch (lhs, rhs)
@@ -31,7 +31,7 @@ enum Token: Equatable, CustomStringConvertible
         }
     }
 
-    public 
+    public
     var description:String
     {
         switch self
@@ -55,19 +55,19 @@ class HTMLParser:Parser
     {
         self.output = []
     }
-    func handle_data(data:[UnicodeScalar])
+    func handle_data(data:[UnicodeScalar], level _:Int)
     {
         self.output.append(.data(data.map{String($0)}.joined()))
     }
-    func handle_starttag(name:String, attributes:[String: String])
+    func handle_starttag(name:String, attributes:[String: String], level _:Int)
     {
         self.output.append(.open(name: name, is_sc: false, attrs: attributes))
     }
-    func handle_startendtag(name:String, attributes:[String: String])
+    func handle_startendtag(name:String, attributes:[String: String], level _:Int)
     {
         self.output.append(.open(name: name, is_sc: true, attrs: attributes))
     }
-    func handle_endtag(name:String)
+    func handle_endtag(name:String, level _:Int)
     {
         self.output.append(.close(name: name))
     }
@@ -82,7 +82,7 @@ func print_tokens(_ tokens:[Token]) -> String
     return tokens.map{String(describing: $0)}.joined(separator: "\n")
 }
 
-public 
+public
 func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true)
 {
     let test_parser = HTMLParser()

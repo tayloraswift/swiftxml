@@ -35,10 +35,6 @@ extension XMLParser
 }
 ```
 
-```swift
-func parse(_:String, parser:Parser)
-```
-
 SwiftXML will tokenize your XML string into tags and data. It does not build any tree structures; that is for you to implement.
 
 See the [`tests.swift`](tests/swiftxml/tests.swift) file for a usage example.

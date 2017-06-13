@@ -13,11 +13,11 @@ SwiftXML doesn’t wrap anything. It parses XML directly, character by character
 ```swift
 protocol Parser
 {
-    func handle_data(data:[UnicodeScalar])
-    func handle_starttag(name:String, attributes:[String: String])
-    func handle_startendtag(name:String, attributes:[String: String])
-    func handle_endtag(name:String)
-    func error(_:String, line:Int, column:Int)
+    func handle_data(data:[Unicode.Scalar], level:Int)
+    func handle_starttag(name:String, namespace_uri:String?, attributes:[String: String], level:Int)
+    func handle_startendtag(name:String, namespace_uri:String?, attributes:[String: String], level:Int)
+    func handle_endtag(name:String, namespace_uri:String?, level:Int)
+    func error(_ message:String, line:Int, column:Int)
 }
 ```
 

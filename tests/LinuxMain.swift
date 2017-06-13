@@ -1,4 +1,5 @@
 import XMLTests
+import Glibc
 
 let test_cases:[(String, [Token])] =
 [
@@ -35,4 +36,4 @@ let test_cases:[(String, [Token])] =
 ("<doc17 <!-- a comment -->></doc18>", [.error("invalid character '<' in tag 'doc17'", 0, 7), .error("invalid tag 'doc17' dropped", 0, 24), .data(">"), .close(name: "doc18")])
 ]
 
-run_tests(cases: test_cases)
+exit(run_tests(cases: test_cases) ? 0 : 1)

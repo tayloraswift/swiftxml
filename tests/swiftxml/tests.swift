@@ -1,4 +1,5 @@
 import XML
+import Glibc
 
 func _print_attributes(_ attributes:[String: String]) -> String
 {
@@ -48,30 +49,43 @@ enum Token: Equatable, CustomStringConvertible
     }
 }
 
-class HTMLParser:Parser
+struct HTMLParser:XMLParser
 {
+    private(set)
     var output:[Token] = []
+
+    mutating
     func reset()
     {
         self.output = []
     }
-    func handle_data(data:[UnicodeScalar], level _:Int)
+
+    mutating
+    func handle_data(data:[Unicode.Scalar], level _:Int)
     {
         self.output.append(.data(data.map{String($0)}.joined()))
     }
-    func handle_starttag(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
+
+    mutating
+    func handle_tag_start(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
     {
         self.output.append(.open(name: name, is_sc: false, attrs: attributes))
     }
-    func handle_startendtag(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
+
+    mutating
+    func handle_tag_start_end(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
     {
         self.output.append(.open(name: name, is_sc: true, attrs: attributes))
     }
-    func handle_endtag(name:String, namespace_uri _:String?, level _:Int)
+
+    mutating
+    func handle_tag_end(name:String, namespace_uri _:String?, level _:Int)
     {
         self.output.append(.close(name: name))
     }
-    func error(_ message:String, line:Int, column:Int)
+
+    mutating
+    func handle_error(_ message:String, line:Int, column:Int)
     {
         self.output.append(.error(message, line, column))
     }
@@ -83,13 +97,13 @@ func print_tokens(_ tokens:[Token]) -> String
 }
 
 public
-func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true)
+func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true) -> Bool
 {
-    let test_parser = HTMLParser()
+    var test_parser = HTMLParser()
     var passed:Int = 0
     for (i, (test_case, expected_result)) in test_cases.enumerated()
     {
-        parse(test_case, parser: test_parser)
+        test_parser.parse(test_case)
         //print(test_parser.output.map{String(describing: $0)}.joined(separator: "\n"))
         //print()
         if test_parser.output == expected_result
@@ -116,8 +130,16 @@ func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true)
         test_parser.reset()
     }
 
+    var t0:Int = 0
+    t0 = clock()
+    test_parser.parse(path: "tests/gl.xml")
+    print("time: \(clock() - t0)")
+    print(test_parser.output.count)
+
     if !test_cases.isEmpty
     {
         print("\u{001B}[1;32m\(passed)/\(test_cases.count) passed\u{1B}[0m")
     }
+
+    return passed == test_cases.count
 }

@@ -82,50 +82,6 @@ extension String
     }
 }
 
-struct UnicodeScalarCountingIterator:IteratorProtocol
-{
-    private
-    let unicode_scalar_view:String.UnicodeScalarView
-
-    private
-    var current_scalar:Unicode.Scalar = "\0",
-        next_position:String.UnicodeScalarView.Index
-
-    private(set)
-    var l:Int = 0,
-        k:Int = -1
-
-    init(_ unicode_scalar_view:String.UnicodeScalarView)
-    {
-        self.unicode_scalar_view = unicode_scalar_view
-        self.next_position       = unicode_scalar_view.startIndex
-    }
-
-    mutating
-    func next() -> Unicode.Scalar?
-    {
-        guard self.next_position != self.unicode_scalar_view.endIndex
-        else
-        {
-            return nil
-        }
-
-        if self.current_scalar == "\n"
-        {
-            self.k  = 0
-            self.l += 1
-        }
-        else
-        {
-            self.k += 1
-        }
-
-        self.current_scalar = self.unicode_scalar_view[self.next_position]
-        self.next_position = self.unicode_scalar_view.index(after: self.next_position)
-        return self.current_scalar
-    }
-}
-
 enum State
 {
     case data(Unicode.Scalar),
@@ -228,10 +184,10 @@ extension XMLParser
     public mutating
     func parse(_ str:String)
     {
-        var state:State                            = .end_markup,
-            markup_context:Markup                  = .none,
-            iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(str.unicodeScalars),
-            iterator_checkpoint:UnicodeScalarCountingIterator = iterator
+        var state:State                                = .end_markup,
+            markup_context:Markup                      = .none,
+            iterator:String.UnicodeScalarView.Iterator = str.unicodeScalars.makeIterator(),
+            iterator_checkpoint:String.UnicodeScalarView.Iterator = iterator
 
         var data_buffer:[Unicode.Scalar]    = [],
             name_buffer:[Unicode.Scalar]    = [],
@@ -239,6 +195,9 @@ extension XMLParser
             value_buffer:[Unicode.Scalar]   = [],
             attributes:[String: String]     = [:],
             string_delimiter:Unicode.Scalar = "\0"
+
+        var position:(l:Int, k:Int)            = (0, 0),
+            position_checkpoint:(l:Int, k:Int) = position
 
         @inline(__always)
         func _emit_tag()
@@ -268,6 +227,7 @@ extension XMLParser
             string_delimiter = "\0"
 
             iterator = iterator_checkpoint
+            position = position_checkpoint
             state = .data("<")
         }
 
@@ -285,6 +245,7 @@ extension XMLParser
                 if u == "<"
                 {
                     iterator_checkpoint = iterator
+                    position_checkpoint = position
                     state = .begin_markup
                 }
                 else
@@ -297,6 +258,7 @@ extension XMLParser
                 if u == "<"
                 {
                     iterator_checkpoint = iterator
+                    position_checkpoint = position
                     self.handle_data(data: data_buffer)
                     data_buffer = []
                     state = .begin_markup
@@ -323,7 +285,7 @@ extension XMLParser
                 else
                 {
                     self.handle_error("unexpected '\(u)' after left angle bracket '<'",
-                                        line: iterator.l, column: iterator.k)
+                                        line: position.l, column: position.k)
                     _reset()
                     continue
                 }
@@ -334,7 +296,7 @@ extension XMLParser
                 else
                 {
                     self.handle_error("unexpected '\(u)' in end tag ''",
-                                        line: iterator.l, column: iterator.k)
+                                        line: position.l, column: position.k)
                     _reset() // syntax error, drop to data
                     continue
                 }
@@ -357,7 +319,7 @@ extension XMLParser
                     else
                     {
                         self.handle_error("unexpected '/' in end tag '\(String(name_buffer))'",
-                                            line: iterator.l, column: iterator.k)
+                                            line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -371,7 +333,7 @@ extension XMLParser
                 else
                 {
                     self.handle_error("unexpected '\(u)' in \(markup_context == .start ? "start" : "end") tag '\(String(name_buffer))'",
-                                        line: iterator.l, column: iterator.k)
+                                        line: position.l, column: position.k)
                     _reset()
                     continue
                 }
@@ -395,7 +357,7 @@ extension XMLParser
                     else
                     {
                         self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: iterator.l, column: iterator.k)
+                                            line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -414,12 +376,12 @@ extension XMLParser
                         if u.is_xml_name_start
                         {
                             self.handle_error("end tag '\(String(name_buffer))' cannot contain attributes",
-                                                line: iterator.l, column: iterator.k)
+                                                line: position.l, column: position.k)
                         }
                         else
                         {
                             self.handle_error("unexpected '\(u)' in end tag '\(String(name_buffer))'",
-                                                line: iterator.l, column: iterator.k)
+                                                line: position.l, column: position.k)
                         }
                         _reset()
                         continue
@@ -443,7 +405,7 @@ extension XMLParser
                     else
                     {
                         self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: iterator.l, column: iterator.k)
+                                            line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -462,7 +424,7 @@ extension XMLParser
                     else
                     {
                         self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: iterator.l, column: iterator.k)
+                                            line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -480,7 +442,7 @@ extension XMLParser
                     else
                     {
                         self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: iterator.l, column: iterator.k)
+                                            line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -500,7 +462,7 @@ extension XMLParser
                     else
                     {
                         self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: iterator.l, column: iterator.k)
+                                            line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -515,7 +477,7 @@ extension XMLParser
                     guard attributes[label_str] == nil
                     else
                     {
-                        self.handle_error("redefinition of attribute '\(label_str)'", line: iterator.l, column: iterator.k)
+                        self.handle_error("redefinition of attribute '\(label_str)'", line: position.l, column: position.k)
                         _reset()
                         continue
                     }
@@ -537,7 +499,7 @@ extension XMLParser
                 else
                 {
                     self.handle_error("unexpected '\(u)' in empty tag '\(String(name_buffer))'",
-                                        line: iterator.l, column: iterator.k)
+                                        line: position.l, column: position.k)
                     _reset()
                     continue
                 }
@@ -551,7 +513,7 @@ extension XMLParser
                 }
                 else
                 {
-                    self.handle_error("XML declarations are unsupported", line: iterator.l, column: iterator.k)
+                    self.handle_error("XML declarations are unsupported", line: position.l, column: position.k)
                     _reset()
                     continue
                 }
@@ -560,7 +522,7 @@ extension XMLParser
                 guard u == "-"
                 else
                 {
-                    self.handle_error("unexpected '\(u)' after '<!-'", line: iterator.l, column: iterator.k)
+                    self.handle_error("unexpected '\(u)' after '<!-'", line: position.l, column: position.k)
                     _reset()
                     continue
                 }
@@ -589,12 +551,22 @@ extension XMLParser
                 else
                 {
                     self.handle_error("unexpected double hyphen '--' inside comment body",
-                                        line: iterator.l, column: iterator.k - 1)
+                                        line: position.l, column: position.k - 1)
                     _reset()
                     continue
                 }
 
                 state = .end_markup
+            }
+
+            if u == "\n"
+            {
+                position.l += 1
+                position.k  = 0
+            }
+            else
+            {
+                position.k += 1
             }
         }
 
@@ -607,7 +579,7 @@ extension XMLParser
             self.handle_data(data: data_buffer)
         default:
             self.handle_error("unexpected end of stream inside markup structure",
-                                line: iterator.l, column: iterator.k + 1)
+                                line: position.l, column: position.k)
         }
     }
 

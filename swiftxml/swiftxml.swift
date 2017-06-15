@@ -124,119 +124,40 @@ struct UnicodeScalarCountingIterator:IteratorProtocol
         self.next_position = self.unicode_scalar_view.index(after: self.next_position)
         return self.current_scalar
     }
-
-    mutating // starts with [name_start_char]
-    func read_name(after name_start_char:Unicode.Scalar) -> (Unicode.Scalar, [Unicode.Scalar])?
-    {
-        var buffer:[Unicode.Scalar] = [name_start_char]
-        while let u:Unicode.Scalar = self.next()
-        {
-            if u.is_xml_name
-            {
-                buffer.append(u)
-            }
-            else
-            {
-                return (u, buffer)
-            }
-        }
-
-        return nil
-    }
-
-    mutating // starts with [whitespace]
-    func read_spaces(after _:Unicode.Scalar) -> Unicode.Scalar?
-    {
-        while let u:Unicode.Scalar = self.next()
-        {
-            if !u.is_xml_whitespace
-            {
-                return u
-            }
-        }
-
-        return nil
-    }
-
-    mutating // starts with [-]
-    func read_comment(after _:Unicode.Scalar) -> Unicode.Scalar?
-    {
-        while let u:Unicode.Scalar = self.next()
-        {
-            if u == "-"
-            {
-                guard let u_after_hyphen:Unicode.Scalar = self.next()
-                else
-                {
-                    return nil
-                }
-
-                if u_after_hyphen == "-"
-                {
-                    return self.next()
-                }
-            }
-        }
-
-        return nil
-    }
-
-    mutating // starts with [string[0]]
-    func read_string(_ str:[Unicode.Scalar], after _:Unicode.Scalar) -> (Unicode.Scalar, Bool)?
-    {
-        for u_str:Unicode.Scalar in str.dropFirst()
-        {
-            guard let u:Unicode.Scalar = self.next()
-            else
-            {
-                return nil
-            }
-
-            if u_str != u
-            {
-                return (u, false)
-            }
-        }
-
-        guard let u_after_str:Unicode.Scalar = self.next()
-        else
-        {
-            return nil
-        }
-        return (u_after_str, true)
-    }
-
-    mutating // starts with "\"" or "'"
-    func read_attribute_value(after quote:Unicode.Scalar) -> (Unicode.Scalar, [Unicode.Scalar])?
-    {
-        var buffer:[Unicode.Scalar] = []
-        while let u:Unicode.Scalar = self.next()
-        {
-            if u == quote
-            {
-                guard let u_after_quote:Unicode.Scalar = self.next()
-                else
-                {
-                    return nil
-                }
-                return (u_after_quote, buffer)
-            }
-            else
-            {
-                buffer.append(u)
-            }
-        }
-
-        return nil
-    }
 }
 
 enum State
 {
-    case initial,
-         angle,
-         data(Unicode.Scalar),
-         revert(UnicodeScalarCountingIterator)
+    case data(Unicode.Scalar),
+         begin_markup,
+         slash1,
+         name(Unicode.Scalar),
+         attributes,
+         no_attributes,
+         label(Unicode.Scalar),
+         space1,
+         equals,
+         space2,
+         attribute_value,
+         slash2,
+         end_markup,
+
+         exclam,
+         hyphen1,
+         comment,
+         hyphen2,
+         hyphen3
+
+//         question
+}
+
+enum Markup
+{
+    case none,
+         start,
+         empty,
+         end,
+         comment
 }
 
 public
@@ -304,379 +225,389 @@ extension XMLParser
         return String(cString: buffer)
     }
 
-    private mutating
-    func eof(iterator:UnicodeScalarCountingIterator)
-    {
-        self.handle_error("unexpected end of stream inside markup structure", line: iterator.l, column: iterator.k + 1)
-    }
-
     public mutating
     func parse(_ str:String)
     {
+        var state:State                            = .end_markup,
+            markup_context:Markup                  = .none,
+            iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(str.unicodeScalars),
+            iterator_checkpoint:UnicodeScalarCountingIterator = iterator
 
-        let unicode_scalars:String.UnicodeScalarView = str.unicodeScalars
+        var data_buffer:[Unicode.Scalar]    = [],
+            name_buffer:[Unicode.Scalar]    = [],
+            label_buffer:[Unicode.Scalar]   = [],
+            value_buffer:[Unicode.Scalar]   = [],
+            attributes:[String: String]     = [:],
+            string_delimiter:Unicode.Scalar = "\0"
 
-        var iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(unicode_scalars),
-            state:State = .initial
-
-        @inline(__always) // starts with [whitespace]
-        func _read_attribute_vector(after first:Unicode.Scalar) -> (Unicode.Scalar, [String: String]?)?
+        @inline(__always)
+        func _emit_tag()
         {
-
-            var attributes:[String: String] = [:],
-                u:Unicode.Scalar            = first
-
-            while true
+            switch markup_context
             {
-                // space1
-                guard let u_after_space1:Unicode.Scalar = iterator.read_spaces(after: u)
-                else
-                {
-                    return nil
-                }
-
-                // name
-                guard u_after_space1.is_xml_name_start
-                else
-                {
-                    return (u_after_space1, attributes)
-                }
-
-                guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_space1)
-                else
-                {
-                    return nil
-                }
-
-                let name_str:String = String(name)
-                guard attributes[name_str] == nil
-                else
-                {
-                    self.handle_error("redefinition of attribute '\(name_str)'", line: iterator.l, column: iterator.k)
-                    return (u_after_name, nil)
-                }
-
-                // space2 ?
-                let u_after_space2:Unicode.Scalar
-                if u_after_name.is_xml_whitespace
-                {
-                    guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_name)
-                    else
-                    {
-                        return nil
-                    }
-                    u_after_space2 = u_after_space
-                }
-                else
-                {
-                    u_after_space2 = u_after_name
-                }
-
-                // equals
-                guard u_after_space2 == "="
-                else
-                {
-                    self.handle_error("unexpected '\(u_after_space2)' in attribute '\(String(name))'", line: iterator.l, column: iterator.k)
-                    return (u_after_space2, nil)
-                }
-                guard let u_after_equals:Unicode.Scalar = iterator.next()
-                else
-                {
-                    return nil
-                }
-
-                // space3?
-                let u_after_space3:Unicode.Scalar
-                if u_after_equals.is_xml_whitespace
-                {
-                    guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_equals)
-                    else
-                    {
-                        return nil
-                    }
-                    u_after_space3 = u_after_space
-                }
-                else
-                {
-                    u_after_space3 = u_after_equals
-                }
-
-                // value
-                guard u_after_space3 == "\"" || u_after_space3 == "'"
-                else
-                {
-                    self.handle_error("unexpected '\(u_after_space3)' in attribute '\(String(name))'", line: iterator.l, column: iterator.k)
-                    return (u_after_space3, nil)
-                }
-                guard let (u_after_value, value):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_attribute_value(after: u_after_space3)
-                else
-                {
-                    return nil
-                }
-
-
-                attributes[name_str] = String(value)
-
-                // space 1
-                guard u_after_value.is_xml_whitespace
-                else
-                {
-                    return (u_after_value, attributes)
-                }
-
-                u = u_after_value
+            case .none:
+                break
+            case .start:
+                self.handle_tag_start(name: String(name_buffer), attributes: attributes)
+            case .empty:
+                self.handle_tag_empty(name: String(name_buffer), attributes: attributes)
+            case .end:
+                self.handle_tag_end(name: String(name_buffer))
+            case .comment:
+                break
             }
         }
 
-        fsm: while true
+        @inline(__always)
+        func _reset()
+        {
+            name_buffer      = []
+            label_buffer     = []
+            value_buffer     = []
+            attributes       = [:]
+            string_delimiter = "\0"
+
+            iterator = iterator_checkpoint
+            state = .data("<")
+        }
+
+        while let u:Unicode.Scalar = iterator.next()
         {
             switch state
             {
-            case .initial:
-                guard let u:Unicode.Scalar = iterator.next()
-                else
+            case .end_markup:
+                _emit_tag()
+                markup_context = .none
+
+                name_buffer = []
+                attributes  = [:]
+
+                if u == "<"
                 {
-                    return
-                }
-
-                state = u == "<" ? .angle : .data(u)
-
-            case .angle:
-                let iterator_state:UnicodeScalarCountingIterator = iterator
-
-                guard let u_after_angle:Unicode.Scalar = iterator.next()
-                else
-                {
-                    self.eof(iterator: iterator)
-                    return
-                }
-
-                if u_after_angle.is_xml_name_start
-                {
-                    guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_angle)
-                    else
-                    {
-                        self.eof(iterator: iterator)
-                        return
-                    }
-
-                    guard let (u_after_attributes, attributes_ret):(Unicode.Scalar, [String: String]?) =
-                    u_after_name.is_xml_whitespace ? _read_attribute_vector(after: u_after_name) : (u_after_name, [:])
-                    else
-                    {
-                        self.eof(iterator: iterator)
-                        return
-                    }
-
-                    guard let attributes:[String: String] = attributes_ret
-                    else
-                    {
-                        state = .revert(iterator_state)
-                        continue
-                    }
-
-                    if u_after_attributes == ">"
-                    {
-                        self.handle_tag_start(name: String(name), attributes: attributes)
-                    }
-                    else if u_after_attributes == "/"
-                    {
-                        guard let u_after_slash:Unicode.Scalar = iterator.next()
-                        else
-                        {
-                            self.eof(iterator: iterator)
-                            return
-                        }
-                        guard u_after_slash == ">"
-                        else
-                        {
-                            self.handle_error("unexpected '\(u_after_slash)' in empty tag '\(String(name))'", line: iterator.l, column: iterator.k)
-                            state = .revert(iterator_state)
-                            continue
-                        }
-
-                        self.handle_tag_empty(name: String(name), attributes: attributes)
-                    }
-                    else
-                    {
-                        self.handle_error("unexpected '\(u_after_attributes)' in start tag '\(String(name))'", line: iterator.l, column: iterator.k)
-                        state = .revert(iterator_state)
-                        continue
-                    }
-                }
-                else if u_after_angle == "/"
-                {
-                    guard let u_after_slash:Unicode.Scalar = iterator.next()
-                    else
-                    {
-                        self.eof(iterator: iterator)
-                        return
-                    }
-
-                    guard u_after_slash.is_xml_name_start
-                    else
-                    {
-                        self.handle_error("unexpected '\(u_after_slash)' in end tag ''", line: iterator.l, column: iterator.k)
-                        state = .revert(iterator_state)
-                        continue
-                    }
-
-                    guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_slash)
-                    else
-                    {
-                        self.eof(iterator: iterator)
-                        return
-                    }
-
-                    // space ?
-                    let u_after_space1:Unicode.Scalar
-                    if u_after_name.is_xml_whitespace
-                    {
-                        guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_name)
-                        else
-                        {
-                            self.eof(iterator: iterator)
-                            return
-                        }
-                        u_after_space1 = u_after_space
-                    }
-                    else
-                    {
-                        u_after_space1 = u_after_name
-                    }
-
-                    guard u_after_space1 == ">"
-                    else
-                    {
-                        if u_after_space1.is_xml_name_start
-                        {
-                            self.handle_error("end tag '\(String(name))' cannot contain attributes", line: iterator.l, column: iterator.k)
-                        }
-                        else
-                        {
-                            self.handle_error("unexpected '\(u_after_space1)' in end tag '\(String(name))'", line: iterator.l, column: iterator.k)
-                        }
-                        state = .revert(iterator_state) // syntax error, drop to data
-                        continue
-                    }
-
-                    self.handle_tag_end(name: String(name))
-                }
-                else if u_after_angle == "!"
-                {
-                    guard let u_after_exclam:Unicode.Scalar = iterator.next()
-                    else
-                    {
-                        self.eof(iterator: iterator)
-                        return
-                    }
-                    if u_after_exclam == "-"
-                    {
-                        guard let u_after_hyphen:Unicode.Scalar = iterator.next()
-                        else
-                        {
-                            self.eof(iterator: iterator)
-                            return
-                        }
-
-                        guard u_after_hyphen == "-"
-                        else
-                        {
-                            self.handle_error("unexpected '\(u_after_hyphen)' after '<!-'", line: iterator.l, column: iterator.k)
-                            state = .revert(iterator_state)
-                            continue
-                        }
-
-                        // reads the comment through to the '--'
-                        guard let u_after_comment:Unicode.Scalar = iterator.read_comment(after: u_after_hyphen)
-                        else
-                        {
-                            self.eof(iterator: iterator)
-                            return
-                        }
-
-                        guard u_after_comment == ">"
-                        else
-                        {
-                            self.handle_error("unexpected double hyphen '--' inside comment body", line: iterator.l, column: iterator.k - 1)
-                            state = .revert(iterator_state)
-                            continue
-                        }
-                    }
-                    else if u_after_exclam == "["
-                    {
-                        guard let (u_after_str, match):(Unicode.Scalar, Bool) = iterator.read_string(["[", "C", "D", "A", "T", "A"], after: u_after_exclam)
-                        else
-                        {
-                            self.eof(iterator: iterator)
-                            return
-                        }
-
-                        guard match
-                        else
-                        {
-                            self.handle_error("unexpected '\(u_after_str)' in CDATA marker", line: iterator.l, column: iterator.k)
-                            state = .revert(iterator_state)
-                            continue
-                        }
-
-                        self.handle_error("CDATA sections are unsupported", line: iterator.l, column: iterator.k)
-                        state = .revert(iterator_state)
-                        continue
-                    }
-                    else if u_after_exclam == "E"
-                    {
-                        guard let (u_after_str, match):(Unicode.Scalar, Bool) = iterator.read_string(["E", "L", "E", "M", "E", "N", "T"], after: u_after_exclam)
-                        else
-                        {
-                            self.eof(iterator: iterator)
-                            return
-                        }
-
-                        guard match
-                        else
-                        {
-                            self.handle_error("unexpected '\(u_after_str)' in element declaration ''", line: iterator.l, column: iterator.k)
-                            state = .revert(iterator_state)
-                            continue
-                        }
-
-                        self.handle_error("element declarations are unsupported", line: iterator.l, column: iterator.k)
-                        state = .revert(iterator_state)
-                        continue
-                    }
+                    iterator_checkpoint = iterator
+                    state = .begin_markup
                 }
                 else
                 {
-                    self.handle_error("unexpected '\(u_after_angle)' after left angle bracket '<'", line: iterator.l, column: iterator.k)
-                    state = .revert(iterator_state) // syntax error, drop to data
+                    state = .data(u)
+                }
+
+            case .data(let u_previous):
+                data_buffer.append(u_previous)
+                if u == "<"
+                {
+                    iterator_checkpoint = iterator
+                    self.handle_data(data: data_buffer)
+                    data_buffer = []
+                    state = .begin_markup
+                }
+                else
+                {
+                    state = .data(u)
+                }
+
+            case .begin_markup:
+                markup_context = .start
+                if u.is_xml_name_start
+                {
+                    state          = .name(u)
+                }
+                else if u == "/"
+                {
+                    state          = .slash1
+                }
+                else if u == "!"
+                {
+                    state          = .exclam
+                }
+                else
+                {
+                    self.handle_error("unexpected '\(u)' after left angle bracket '<'",
+                                        line: iterator.l, column: iterator.k)
+                    _reset()
                     continue
                 }
 
-                state = .initial
-
-            case .data(let first):
-                var buffer:[Unicode.Scalar] = [first]
-                while let u:Unicode.Scalar = iterator.next()
+            case .slash1:
+                markup_context = .end
+                guard u.is_xml_name_start
+                else
                 {
-                    guard u != "<"
-                    else
-                    {
-                        self.handle_data(data: buffer)
-                        state = .angle
-                        continue fsm
-                    }
-
-                    buffer.append(u)
+                    self.handle_error("unexpected '\(u)' in end tag ''",
+                                        line: iterator.l, column: iterator.k)
+                    _reset() // syntax error, drop to data
+                    continue
                 }
 
-                self.handle_data(data: buffer)
-                return
+                state = .name(u)
 
-            case .revert(let iterator_state):
-                iterator = iterator_state
-                state = .data("<")
+            case .name(let u_previous):
+                name_buffer.append(u_previous)
+                if u.is_xml_name
+                {
+                    state = .name(u)
+                }
+                else if u.is_xml_whitespace
+                {
+                    state = markup_context == .start ? .attributes : .no_attributes
+                }
+                else if u == "/"
+                {
+                    guard markup_context == .start
+                    else
+                    {
+                        self.handle_error("unexpected '/' in end tag '\(String(name_buffer))'",
+                                            line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+
+                    state = .slash2
+                }
+                else if u == ">"
+                {
+                    state = .end_markup
+                }
+                else
+                {
+                    self.handle_error("unexpected '\(u)' in \(markup_context == .start ? "start" : "end") tag '\(String(name_buffer))'",
+                                        line: iterator.l, column: iterator.k)
+                    _reset()
+                    continue
+                }
+
+            case .attributes:
+                if u.is_xml_name_start
+                {
+                    state = .label(u)
+                }
+                else if u == "/"
+                {
+                    state = .slash2
+                }
+                else if u == ">"
+                {
+                    state = .end_markup
+                }
+                else
+                {
+                    guard u.is_xml_whitespace
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
+                                            line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+                }
+
+            case .no_attributes:
+                if u == ">"
+                {
+                    state = .end_markup
+                }
+                else
+                {
+                    guard u.is_xml_whitespace
+                    else
+                    {
+                        if u.is_xml_name_start
+                        {
+                            self.handle_error("end tag '\(String(name_buffer))' cannot contain attributes",
+                                                line: iterator.l, column: iterator.k)
+                        }
+                        else
+                        {
+                            self.handle_error("unexpected '\(u)' in end tag '\(String(name_buffer))'",
+                                                line: iterator.l, column: iterator.k)
+                        }
+                        _reset()
+                        continue
+                    }
+                }
+
+            case .label(let u_previous):
+                label_buffer.append(u_previous)
+
+                if u.is_xml_name
+                {
+                    state = .label(u)
+                }
+                else if u == "="
+                {
+                    state = .equals
+                }
+                else
+                {
+                    guard u.is_xml_whitespace
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
+                                            line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+
+                    state = .space1
+                }
+
+            case .space1:
+                if u == "="
+                {
+                    state = .equals
+                }
+                else
+                {
+                    guard u.is_xml_whitespace
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
+                                            line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+                }
+
+            case .equals:
+                if u == "\"" || u == "'"
+                {
+                    string_delimiter = u
+                    state = .attribute_value
+                }
+                else
+                {
+                    guard u.is_xml_whitespace
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
+                                            line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+
+                    state = .space2
+                }
+
+            case .space2:
+                if u == "\"" || u == "'"
+                {
+                    string_delimiter = u
+                    state = .attribute_value
+                }
+                else
+                {
+                    guard u.is_xml_whitespace
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
+                                            line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+                }
+
+            case .attribute_value:
+                if u == string_delimiter
+                {
+                    string_delimiter = "\0"
+                    let label_str:String = String(label_buffer)
+
+                    guard attributes[label_str] == nil
+                    else
+                    {
+                        self.handle_error("redefinition of attribute '\(label_str)'", line: iterator.l, column: iterator.k)
+                        _reset()
+                        continue
+                    }
+
+                    attributes[label_str] = String(value_buffer)
+                    label_buffer = []
+                    value_buffer = []
+
+                    state = .attributes
+                }
+                else
+                {
+                    value_buffer.append(u)
+                }
+
+            case .slash2:
+                markup_context = .empty
+                guard u == ">"
+                else
+                {
+                    self.handle_error("unexpected '\(u)' in empty tag '\(String(name_buffer))'",
+                                        line: iterator.l, column: iterator.k)
+                    _reset()
+                    continue
+                }
+
+                state = .end_markup
+
+            case .exclam:
+                if u == "-"
+                {
+                    state = .hyphen1
+                }
+                else
+                {
+                    self.handle_error("XML declarations are unsupported", line: iterator.l, column: iterator.k)
+                    _reset()
+                    continue
+                }
+
+            case .hyphen1:
+                guard u == "-"
+                else
+                {
+                    self.handle_error("unexpected '\(u)' after '<!-'", line: iterator.l, column: iterator.k)
+                    _reset()
+                    continue
+                }
+
+                state = .comment
+
+            case .comment:
+                markup_context = .comment
+                if u == "-"
+                {
+                    state = .hyphen2
+                }
+
+            case .hyphen2:
+                if u == "-"
+                {
+                    state = .hyphen3
+                }
+                else
+                {
+                    state = .comment
+                }
+
+            case .hyphen3:
+                guard u == ">"
+                else
+                {
+                    self.handle_error("unexpected double hyphen '--' inside comment body",
+                                        line: iterator.l, column: iterator.k - 1)
+                    _reset()
+                    continue
+                }
+
+                state = .end_markup
             }
+        }
+
+        switch state
+        {
+        case .end_markup:
+            _emit_tag()
+        case .data(let u_final):
+            data_buffer.append(u_final)
+            self.handle_data(data: data_buffer)
+        default:
+            self.handle_error("unexpected end of stream inside markup structure",
+                                line: iterator.l, column: iterator.k + 1)
         }
     }
 

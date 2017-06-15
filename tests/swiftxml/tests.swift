@@ -38,7 +38,7 @@ enum Token: Equatable, CustomStringConvertible
         switch self
         {
         case let .open(name, sc, attrs):
-            return "\(sc ? "selfclosing" : "start") tag: \(name), attributes: \(_print_attributes(attrs))"
+            return "\(sc ? "empty" : "start") tag: \(name), attributes: \(_print_attributes(attrs))"
         case .close(let name):
             return "end tag: \(name)"
         case let .error(message, l, k):

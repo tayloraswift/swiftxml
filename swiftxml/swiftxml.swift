@@ -82,33 +82,35 @@ extension String
     }
 }
 
-struct UnicodeScalarBacktrackingIterator:IteratorProtocol
+struct UnicodeScalarCountingIterator:IteratorProtocol
 {
     private
     let unicode_scalar_view:String.UnicodeScalarView
 
+    private
+    var current_scalar:Unicode.Scalar = "\0",
+        next_position:String.UnicodeScalarView.Index
+
     private(set)
-    var position:String.UnicodeScalarView.Index,
-        l:Int = 0,
-        k:Int = 0
+    var l:Int = 0,
+        k:Int = -1
 
     init(_ unicode_scalar_view:String.UnicodeScalarView)
     {
         self.unicode_scalar_view = unicode_scalar_view
-        self.position            = unicode_scalar_view.startIndex
+        self.next_position       = unicode_scalar_view.startIndex
     }
 
     mutating
     func next() -> Unicode.Scalar?
     {
-        guard self.position != self.unicode_scalar_view.endIndex
+        guard self.next_position != self.unicode_scalar_view.endIndex
         else
         {
             return nil
         }
 
-        let u:Unicode.Scalar = self.unicode_scalar_view[self.position]
-        if u == "\n"
+        if self.current_scalar == "\n"
         {
             self.k  = 0
             self.l += 1
@@ -118,14 +120,9 @@ struct UnicodeScalarBacktrackingIterator:IteratorProtocol
             self.k += 1
         }
 
-        self.position = self.unicode_scalar_view.index(after: self.position)
-        return u
-    }
-
-    mutating
-    func reset(to index:String.UnicodeScalarView.Index)
-    {
-        self.position = index
+        self.current_scalar = self.unicode_scalar_view[self.next_position]
+        self.next_position = self.unicode_scalar_view.index(after: self.next_position)
+        return self.current_scalar
     }
 
     mutating // starts with [name_start_char]
@@ -169,7 +166,12 @@ struct UnicodeScalarBacktrackingIterator:IteratorProtocol
         {
             if u == quote
             {
-                return (u, buffer)
+                guard let u_after_quote:Unicode.Scalar = self.next()
+                else
+                {
+                    return nil
+                }
+                return (u_after_quote, buffer)
             }
             else
             {
@@ -229,7 +231,7 @@ struct UnicodeScalarBacktrackingIterator:IteratorProtocol
             guard u_after_space2 == "="
             else
             {
-                parser.handle_error("expected '=' after attribute name \(String(name))", line: self.l, column: self.k)
+                parser.handle_error("unexpected '\(u_after_space2)' in attribute '\(String(name))'", line: self.l, column: self.k)
                 return (u_after_space2, nil)
             }
             guard let u_after_equals:Unicode.Scalar = self.next()
@@ -251,14 +253,14 @@ struct UnicodeScalarBacktrackingIterator:IteratorProtocol
             }
             else
             {
-                u_after_space3 = u_after_name
+                u_after_space3 = u_after_equals
             }
 
             // value
             guard u_after_space3 == "\"" || u_after_space3 == "'"
             else
             {
-                parser.handle_error("expected ''' or '\"' after attribute name \(String(name))=", line: self.l, column: self.k)
+                parser.handle_error("unexpected '\(u_after_space3)' in attribute '\(String(name))'", line: self.l, column: self.k)
                 return (u_after_space3, nil)
             }
             guard let (u_after_value, value):(Unicode.Scalar, [Unicode.Scalar]) = self.read_attribute_value(after: u_after_space3)
@@ -286,13 +288,13 @@ enum _State
     case initial,
          angle,
          data(Unicode.Scalar),
-         revert(String.UnicodeScalarView.Index)
+         revert(UnicodeScalarCountingIterator)
 }
 
 public
 func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) where P:XMLParser
 {
-    var iterator:UnicodeScalarBacktrackingIterator = UnicodeScalarBacktrackingIterator(unicode_scalars)
+    var iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(unicode_scalars)
 
     var state:_State = .initial
 
@@ -310,12 +312,12 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
             state = u == "<" ? .angle : .data(u)
 
         case .angle:
-            let bracket_index:String.UnicodeScalarView.Index = iterator.position
+            let iterator_state:UnicodeScalarCountingIterator = iterator
 
             guard let u_after_angle:Unicode.Scalar = iterator.next()
             else
             {
-                parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
                 return
             }
 
@@ -324,7 +326,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_angle)
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
                     return
                 }
 
@@ -332,14 +334,14 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 u_after_name.is_xml_whitespace ? iterator.read_attribute_vector(after: u_after_name, sending_errors_to: &parser) : (u_after_name, [:])
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
                     return
                 }
 
                 guard let attributes:[String: String] = attributes_ret
                 else
                 {
-                    state = .revert(bracket_index) // syntax error, drop to data
+                    state = .revert(iterator_state)
                     continue
                 }
 
@@ -352,26 +354,47 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                     guard let u_after_slash:Unicode.Scalar = iterator.next()
                     else
                     {
-                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
                         return
                     }
                     guard u_after_slash == ">"
                     else
                     {
-                        parser.handle_error("expected '>' after empty tag break '/'", line: iterator.l, column: iterator.k)
-                        state = .revert(bracket_index) // syntax error, drop to data
+                        parser.handle_error("unexpected '\(u_after_slash)' in empty tag '\(String(name))'", line: iterator.l, column: iterator.k)
+                        state = .revert(iterator_state)
                         continue
                     }
 
                     parser.handle_tag_start_end(name: String(name), namespace_uri: nil, attributes: attributes, level: 0)
                 }
+                else
+                {
+                    parser.handle_error("unexpected '\(u_after_attributes)' in start tag '\(String(name))'", line: iterator.l, column: iterator.k)
+                    state = .revert(iterator_state)
+                    continue
+                }
             }
             else if u_after_angle == "/"
             {
-                guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_angle)
+                guard let u_after_slash:Unicode.Scalar = iterator.next()
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                    return
+                }
+
+                guard u_after_slash.is_xml_name_start
+                else
+                {
+                    parser.handle_error("unexpected '\(u_after_slash)' in end tag ''", line: iterator.l, column: iterator.k)
+                    state = .revert(iterator_state)
+                    continue
+                }
+
+                guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_slash)
+                else
+                {
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
                     return
                 }
 
@@ -382,7 +405,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                     guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_name)
                     else
                     {
-                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
                         return
                     }
                     u_after_space1 = u_after_space
@@ -395,8 +418,15 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 guard u_after_space1 == ">"
                 else
                 {
-                    parser.handle_error("expected '>' after end tag name \(String(name))", line: iterator.l, column: iterator.k)
-                    state = .revert(bracket_index) // syntax error, drop to data
+                    if u_after_space1.is_xml_name_start
+                    {
+                        parser.handle_error("end tag '\(String(name))' cannot contain attributes", line: iterator.l, column: iterator.k)
+                    }
+                    else
+                    {
+                        parser.handle_error("unexpected '\(u_after_space1)' in end tag '\(String(name))'", line: iterator.l, column: iterator.k)
+                    }
+                    state = .revert(iterator_state) // syntax error, drop to data
                     continue
                 }
 
@@ -404,8 +434,8 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
             }
             else
             {
-                parser.handle_error("unexpected '\(u_after_angle)'", line: iterator.l, column: iterator.k)
-                state = .revert(bracket_index) // syntax error, drop to data
+                parser.handle_error("unexpected '\(u_after_angle)' after left angle bracket '<'", line: iterator.l, column: iterator.k)
+                state = .revert(iterator_state) // syntax error, drop to data
                 continue
             }
 
@@ -429,8 +459,8 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
             parser.handle_data(data: buffer, level: 0)
             return
 
-        case .revert(let index):
-            iterator.reset(to: index)
+        case .revert(let iterator_state):
+            iterator = iterator_state
             state = .data("<")
         }
     }

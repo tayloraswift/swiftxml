@@ -229,106 +229,6 @@ struct UnicodeScalarCountingIterator:IteratorProtocol
 
         return nil
     }
-
-    mutating // starts with [whitespace]
-    func read_attribute_vector<P>(after first:Unicode.Scalar, sending_errors_to parser:inout P) -> (Unicode.Scalar, [String: String]?)? where P:XMLParser
-    {
-
-        var attributes:[String: String] = [:],
-            u:Unicode.Scalar            = first
-
-        while true
-        {
-            // space1
-            guard let u_after_space1:Unicode.Scalar = self.read_spaces(after: u)
-            else
-            {
-                return nil
-            }
-
-            // name
-            guard u_after_space1.is_xml_name_start
-            else
-            {
-                return (u_after_space1, attributes)
-            }
-
-            guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = self.read_name(after: u_after_space1)
-            else
-            {
-                return nil
-            }
-
-            // space2 ?
-            let u_after_space2:Unicode.Scalar
-            if u_after_name.is_xml_whitespace
-            {
-                guard let u_after_space:Unicode.Scalar = self.read_spaces(after: u_after_name)
-                else
-                {
-                    return nil
-                }
-                u_after_space2 = u_after_space
-            }
-            else
-            {
-                u_after_space2 = u_after_name
-            }
-
-            // equals
-            guard u_after_space2 == "="
-            else
-            {
-                parser.handle_error("unexpected '\(u_after_space2)' in attribute '\(String(name))'", line: self.l, column: self.k)
-                return (u_after_space2, nil)
-            }
-            guard let u_after_equals:Unicode.Scalar = self.next()
-            else
-            {
-                return nil
-            }
-
-            // space3?
-            let u_after_space3:Unicode.Scalar
-            if u_after_equals.is_xml_whitespace
-            {
-                guard let u_after_space:Unicode.Scalar = self.read_spaces(after: u_after_equals)
-                else
-                {
-                    return nil
-                }
-                u_after_space3 = u_after_space
-            }
-            else
-            {
-                u_after_space3 = u_after_equals
-            }
-
-            // value
-            guard u_after_space3 == "\"" || u_after_space3 == "'"
-            else
-            {
-                parser.handle_error("unexpected '\(u_after_space3)' in attribute '\(String(name))'", line: self.l, column: self.k)
-                return (u_after_space3, nil)
-            }
-            guard let (u_after_value, value):(Unicode.Scalar, [Unicode.Scalar]) = self.read_attribute_value(after: u_after_space3)
-            else
-            {
-                return nil
-            }
-
-            attributes[String(name)] = String(value)
-
-            // space 1
-            guard u_after_value.is_xml_whitespace
-            else
-            {
-                return (u_after_value, attributes)
-            }
-
-            u = u_after_value
-        }
-    }
 }
 
 enum _State
@@ -353,6 +253,115 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
 {
     var iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(unicode_scalars),
         state:_State = .initial
+
+    @inline(__always) // starts with [whitespace]
+    func _read_attribute_vector(after first:Unicode.Scalar) -> (Unicode.Scalar, [String: String]?)?
+    {
+
+        var attributes:[String: String] = [:],
+            u:Unicode.Scalar            = first
+
+        while true
+        {
+            // space1
+            guard let u_after_space1:Unicode.Scalar = iterator.read_spaces(after: u)
+            else
+            {
+                return nil
+            }
+
+            // name
+            guard u_after_space1.is_xml_name_start
+            else
+            {
+                return (u_after_space1, attributes)
+            }
+
+            guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_space1)
+            else
+            {
+                return nil
+            }
+
+            let name_str:String = String(name)
+            guard attributes[name_str] == nil
+            else
+            {
+                parser.handle_error("redefinition of attribute '\(name_str)'", line: iterator.l, column: iterator.k)
+                return (u_after_name, nil)
+            }
+
+            // space2 ?
+            let u_after_space2:Unicode.Scalar
+            if u_after_name.is_xml_whitespace
+            {
+                guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_name)
+                else
+                {
+                    return nil
+                }
+                u_after_space2 = u_after_space
+            }
+            else
+            {
+                u_after_space2 = u_after_name
+            }
+
+            // equals
+            guard u_after_space2 == "="
+            else
+            {
+                parser.handle_error("unexpected '\(u_after_space2)' in attribute '\(String(name))'", line: iterator.l, column: iterator.k)
+                return (u_after_space2, nil)
+            }
+            guard let u_after_equals:Unicode.Scalar = iterator.next()
+            else
+            {
+                return nil
+            }
+
+            // space3?
+            let u_after_space3:Unicode.Scalar
+            if u_after_equals.is_xml_whitespace
+            {
+                guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_equals)
+                else
+                {
+                    return nil
+                }
+                u_after_space3 = u_after_space
+            }
+            else
+            {
+                u_after_space3 = u_after_equals
+            }
+
+            // value
+            guard u_after_space3 == "\"" || u_after_space3 == "'"
+            else
+            {
+                parser.handle_error("unexpected '\(u_after_space3)' in attribute '\(String(name))'", line: iterator.l, column: iterator.k)
+                return (u_after_space3, nil)
+            }
+            guard let (u_after_value, value):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_attribute_value(after: u_after_space3)
+            else
+            {
+                return nil
+            }
+
+
+            attributes[name_str] = String(value)
+
+            // space 1
+            guard u_after_value.is_xml_whitespace
+            else
+            {
+                return (u_after_value, attributes)
+            }
+
+            u = u_after_value
+        }
+    }
 
     fsm: while true
     {
@@ -387,7 +396,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 }
 
                 guard let (u_after_attributes, attributes_ret):(Unicode.Scalar, [String: String]?) =
-                u_after_name.is_xml_whitespace ? iterator.read_attribute_vector(after: u_after_name, sending_errors_to: &parser) : (u_after_name, [:])
+                u_after_name.is_xml_whitespace ? _read_attribute_vector(after: u_after_name) : (u_after_name, [:])
                 else
                 {
                     parser.eof(iterator: iterator)

@@ -12,7 +12,7 @@ public
 enum Token: Equatable, CustomStringConvertible
 {
     case open(name:String, is_sc:Bool, attrs:[String: String])
-    case close(name:String), error(String, Int, Int), data(String)
+    case close(name:String), error(String, Int, Int), data(String), pi(String, String)
 
     public
     static func == (lhs:Token, rhs:Token) -> Bool
@@ -27,6 +27,8 @@ enum Token: Equatable, CustomStringConvertible
             return message1 == message2 && (l1, k1) == (l2, k2)
         case (.data(let v1), .data(let v2)):
             return v1 == v2
+        case (let .pi(target1, data1), let .pi(target2, data2)):
+            return target1 == target2 && data1 == data2
         default:
             return false
         }
@@ -43,6 +45,8 @@ enum Token: Equatable, CustomStringConvertible
             return "end tag: \(name)"
         case let .error(message, l, k):
             return "\u{001B}[0;33m(\(l + 1):\(k + 1)) Warning: \(message)\u{1B}[0m"
+        case let .pi(target, data):
+            return "processing instruction [\(target)]: '\(data)'"
         case .data(let v):
             return v
         }
@@ -63,7 +67,7 @@ struct HTMLParser:XMLParser
     mutating
     func handle_data(data:[Unicode.Scalar])
     {
-        self.output.append(.data(data.map{String($0)}.joined()))
+        self.output.append(.data(String(data.map(Character.init))))
     }
 
     mutating
@@ -82,6 +86,12 @@ struct HTMLParser:XMLParser
     func handle_tag_end(name:String)
     {
         self.output.append(.close(name: name))
+    }
+
+    mutating
+    func handle_processing_instruction(target:String, data: [Unicode.Scalar])
+    {
+        self.output.append(.pi(target, String(data.map(Character.init))))
     }
 
     mutating
@@ -134,7 +144,7 @@ func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true) 
     t0 = clock()
     test_parser.parse(path: "tests/gl.xml")
     print("time: \(clock() - t0)")
-    print(test_parser.output[0 ... 3])
+    print(test_parser.output[0 ... 5])
     print(test_parser.output.count)
 
     if !test_cases.isEmpty

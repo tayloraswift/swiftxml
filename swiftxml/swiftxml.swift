@@ -29,6 +29,8 @@ protocol XMLParser
     mutating
     func handle_tag_end(name:String)
     mutating
+    func handle_processing_instruction(target:String, data: [Unicode.Scalar])
+    mutating
     func handle_error(_ message:String, line:Int, column:Int)
 }
 
@@ -102,9 +104,12 @@ enum State
          hyphen1,
          comment,
          hyphen2,
-         hyphen3
+         hyphen3,
 
-//         question
+         question1,
+         pi_space,
+         pi_data(Unicode.Scalar),
+         question2
 }
 
 enum Markup
@@ -113,7 +118,8 @@ enum Markup
          start,
          empty,
          end,
-         comment
+         comment,
+         processing
 }
 
 public
@@ -214,12 +220,17 @@ extension XMLParser
                 self.handle_tag_end(name: String(name_buffer))
             case .comment:
                 break
+            case .processing:
+                self.handle_processing_instruction(target: String(name_buffer), data: value_buffer)
+                value_buffer = []
             }
         }
 
         @inline(__always)
         func _reset()
         {
+            markup_context = .none
+
             name_buffer      = []
             label_buffer     = []
             value_buffer     = []
@@ -282,6 +293,10 @@ extension XMLParser
                 {
                     state          = .exclam
                 }
+                else if u == "?"
+                {
+                    state          = .question1
+                }
                 else
                 {
                     self.handle_error("unexpected '\(u)' after left angle bracket '<'",
@@ -308,34 +323,66 @@ extension XMLParser
                 if u.is_xml_name
                 {
                     state = .name(u)
+                    break
                 }
-                else if u.is_xml_whitespace
+
+                if markup_context == .start
                 {
-                    state = markup_context == .start ? .attributes : .no_attributes
-                }
-                else if u == "/"
-                {
-                    guard markup_context == .start
+                    if u.is_xml_whitespace
+                    {
+                        state = .attributes
+                    }
+                    else if u == "/"
+                    {
+                        state = .slash2
+                    }
+                    else if u == ">"
+                    {
+                        state = .end_markup
+                    }
                     else
                     {
-                        self.handle_error("unexpected '/' in end tag '\(String(name_buffer))'",
+                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
                                             line: position.l, column: position.k)
                         _reset()
                         continue
                     }
-
-                    state = .slash2
                 }
-                else if u == ">"
+                else if markup_context == .end
                 {
-                    state = .end_markup
+                    if u.is_xml_whitespace
+                    {
+                        state = .no_attributes
+                    }
+                    else if u == ">"
+                    {
+                        state = .end_markup
+                    }
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in end tag '\(String(name_buffer))'",
+                                            line: position.l, column: position.k)
+                        _reset()
+                        continue
+                    }
                 }
-                else
+                else if markup_context == .processing
                 {
-                    self.handle_error("unexpected '\(u)' in \(markup_context == .start ? "start" : "end") tag '\(String(name_buffer))'",
-                                        line: position.l, column: position.k)
-                    _reset()
-                    continue
+                    if u.is_xml_whitespace
+                    {
+                        state = .pi_space
+                    }
+                    else if u == "?"
+                    {
+                        state = .question2
+                    }
+                    else
+                    {
+                        self.handle_error("unexpected '\(u)' in processing instruction '\(String(name_buffer))'",
+                                            line: position.l, column: position.k)
+                        _reset()
+                        continue
+                    }
                 }
 
             case .attributes:
@@ -557,6 +604,50 @@ extension XMLParser
                 }
 
                 state = .end_markup
+
+            case .question1:
+                markup_context = .processing
+                guard u.is_xml_name_start
+                else
+                {
+                    self.handle_error("unexpected '\(u)' after '<?'", line: position.l, column: position.k)
+                    _reset()
+                    continue
+                }
+
+                state = .name(u)
+
+            case .pi_space:
+                if u == "?"
+                {
+                    state = .question2
+                }
+                else if !u.is_xml_whitespace
+                {
+                    state = .pi_data(u)
+                }
+
+            case .pi_data(let u_previous):
+                value_buffer.append(u_previous)
+                if u == "?"
+                {
+                    state = .question2
+                }
+                else
+                {
+                    state = .pi_data(u)
+                }
+
+            case .question2:
+                if u == ">"
+                {
+                    state = .end_markup
+                }
+                else
+                {
+                    value_buffer.append("?")
+                    state = .pi_data(u)
+                }
             }
 
             if u == "\n"

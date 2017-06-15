@@ -61,25 +61,25 @@ struct HTMLParser:XMLParser
     }
 
     mutating
-    func handle_data(data:[Unicode.Scalar], level _:Int)
+    func handle_data(data:[Unicode.Scalar])
     {
         self.output.append(.data(data.map{String($0)}.joined()))
     }
 
     mutating
-    func handle_tag_start(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
+    func handle_tag_start(name:String, attributes:[String: String])
     {
         self.output.append(.open(name: name, is_sc: false, attrs: attributes))
     }
 
     mutating
-    func handle_tag_start_end(name:String, namespace_uri _:String?, attributes:[String: String], level _:Int)
+    func handle_tag_empty(name:String, attributes:[String: String])
     {
         self.output.append(.open(name: name, is_sc: true, attrs: attributes))
     }
 
     mutating
-    func handle_tag_end(name:String, namespace_uri _:String?, level _:Int)
+    func handle_tag_end(name:String)
     {
         self.output.append(.close(name: name))
     }
@@ -103,7 +103,7 @@ func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true) 
     var passed:Int = 0
     for (i, (test_case, expected_result)) in test_cases.enumerated()
     {
-        read_markup(unicode_scalars: test_case.unicodeScalars, parser: &test_parser)
+        test_parser.parse(test_case)
         //print(test_parser.output.map{String(describing: $0)}.joined(separator: "\n"))
         //print()
         if test_parser.output == expected_result

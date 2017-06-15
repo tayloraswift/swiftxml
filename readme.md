@@ -22,6 +22,8 @@ protocol XMLParser
     mutating
     func handle_tag_end(name:String)
     mutating
+    func handle_processing_instruction(target:String, data: [Unicode.Scalar])
+    mutating
     func handle_error(_ message:String, line:Int, column:Int)
 }
 

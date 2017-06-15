@@ -158,6 +158,54 @@ struct UnicodeScalarCountingIterator:IteratorProtocol
         return nil
     }
 
+    mutating // starts with [-]
+    func read_comment(after _:Unicode.Scalar) -> Unicode.Scalar?
+    {
+        while let u:Unicode.Scalar = self.next()
+        {
+            if u == "-"
+            {
+                guard let u_after_hyphen:Unicode.Scalar = self.next()
+                else
+                {
+                    return nil
+                }
+
+                if u_after_hyphen == "-"
+                {
+                    return self.next()
+                }
+            }
+        }
+
+        return nil
+    }
+
+    mutating // starts with [string[0]]
+    func read_string(_ str:[Unicode.Scalar], after _:Unicode.Scalar) -> (Unicode.Scalar, Bool)?
+    {
+        for u_str:Unicode.Scalar in str.dropFirst()
+        {
+            guard let u:Unicode.Scalar = self.next()
+            else
+            {
+                return nil
+            }
+
+            if u_str != u
+            {
+                return (u, false)
+            }
+        }
+
+        guard let u_after_str:Unicode.Scalar = self.next()
+        else
+        {
+            return nil
+        }
+        return (u_after_str, true)
+    }
+
     mutating // starts with "\"" or "'"
     func read_attribute_value(after quote:Unicode.Scalar) -> (Unicode.Scalar, [Unicode.Scalar])?
     {
@@ -291,12 +339,20 @@ enum _State
          revert(UnicodeScalarCountingIterator)
 }
 
+extension XMLParser
+{
+    mutating
+    func eof(iterator:UnicodeScalarCountingIterator)
+    {
+        self.handle_error("unexpected end of stream inside markup structure", line: iterator.l, column: iterator.k + 1)
+    }
+}
+
 public
 func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) where P:XMLParser
 {
-    var iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(unicode_scalars)
-
-    var state:_State = .initial
+    var iterator:UnicodeScalarCountingIterator = UnicodeScalarCountingIterator(unicode_scalars),
+        state:_State = .initial
 
     fsm: while true
     {
@@ -317,7 +373,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
             guard let u_after_angle:Unicode.Scalar = iterator.next()
             else
             {
-                parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                parser.eof(iterator: iterator)
                 return
             }
 
@@ -326,7 +382,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_angle)
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                    parser.eof(iterator: iterator)
                     return
                 }
 
@@ -334,7 +390,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 u_after_name.is_xml_whitespace ? iterator.read_attribute_vector(after: u_after_name, sending_errors_to: &parser) : (u_after_name, [:])
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                    parser.eof(iterator: iterator)
                     return
                 }
 
@@ -354,7 +410,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                     guard let u_after_slash:Unicode.Scalar = iterator.next()
                     else
                     {
-                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                        parser.eof(iterator: iterator)
                         return
                     }
                     guard u_after_slash == ">"
@@ -379,7 +435,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 guard let u_after_slash:Unicode.Scalar = iterator.next()
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                    parser.eof(iterator: iterator)
                     return
                 }
 
@@ -394,7 +450,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_slash)
                 else
                 {
-                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                    parser.eof(iterator: iterator)
                     return
                 }
 
@@ -405,7 +461,7 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                     guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_name)
                     else
                     {
-                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k + 1)
+                        parser.eof(iterator: iterator)
                         return
                     }
                     u_after_space1 = u_after_space
@@ -431,6 +487,69 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                 }
 
                 parser.handle_tag_end(name: String(name), namespace_uri: nil, level: 0)
+            }
+            else if u_after_angle == "!"
+            {
+                guard let u_after_exclam:Unicode.Scalar = iterator.next()
+                else
+                {
+                    parser.eof(iterator: iterator)
+                    return
+                }
+                if u_after_exclam == "-"
+                {
+                    guard let u_after_hyphen:Unicode.Scalar = iterator.next()
+                    else
+                    {
+                        parser.eof(iterator: iterator)
+                        return
+                    }
+
+                    guard u_after_hyphen == "-"
+                    else
+                    {
+                        parser.handle_error("unexpected '\(u_after_hyphen)' after '<!-'", line: iterator.l, column: iterator.k)
+                        state = .revert(iterator_state)
+                        continue
+                    }
+
+                    // reads the comment through to the '--'
+                    guard let u_after_comment:Unicode.Scalar = iterator.read_comment(after: u_after_hyphen)
+                    else
+                    {
+                        parser.eof(iterator: iterator)
+                        return
+                    }
+
+                    guard u_after_comment == ">"
+                    else
+                    {
+                        parser.handle_error("unexpected double hyphen '--' inside comment body", line: iterator.l, column: iterator.k - 1)
+                        state = .revert(iterator_state)
+                        continue
+                    }
+                }
+                else if u_after_exclam == "E"
+                {
+                    guard let (u_after_str, match):(Unicode.Scalar, Bool) = iterator.read_string(["E", "L", "E", "M", "E", "N", "T"], after: u_after_exclam)
+                    else
+                    {
+                        parser.eof(iterator: iterator)
+                        return
+                    }
+
+                    guard match
+                    else
+                    {
+                        parser.handle_error("unexpected '\(u_after_str)' in element declaration ''", line: iterator.l, column: iterator.k)
+                        state = .revert(iterator_state)
+                        continue
+                    }
+
+                    parser.handle_error("element declarations are unsupported", line: iterator.l, column: iterator.k)
+                    state = .revert(iterator_state)
+                    continue
+                }
             }
             else
             {

@@ -74,6 +74,369 @@ extension Unicode.Scalar
     }
 }
 
+extension String
+{
+    init(_ buffer:[Unicode.Scalar])
+    {
+        self.init(buffer.map(Character.init))
+    }
+}
+
+struct UnicodeScalarBacktrackingIterator:IteratorProtocol
+{
+    private
+    let unicode_scalar_view:String.UnicodeScalarView
+
+    private(set)
+    var position:String.UnicodeScalarView.Index,
+        l:Int = 0,
+        k:Int = 0
+
+    init(_ unicode_scalar_view:String.UnicodeScalarView)
+    {
+        self.unicode_scalar_view = unicode_scalar_view
+        self.position            = unicode_scalar_view.startIndex
+    }
+
+    mutating
+    func next() -> Unicode.Scalar?
+    {
+        guard self.position != self.unicode_scalar_view.endIndex
+        else
+        {
+            return nil
+        }
+
+        let u:Unicode.Scalar = self.unicode_scalar_view[self.position]
+        if u == "\n"
+        {
+            self.k  = 0
+            self.l += 1
+        }
+        else
+        {
+            self.k += 1
+        }
+
+        self.position = self.unicode_scalar_view.index(after: self.position)
+        return u
+    }
+
+    mutating
+    func reset(to index:String.UnicodeScalarView.Index)
+    {
+        self.position = index
+    }
+
+    mutating // starts with [name_start_char]
+    func read_name(after name_start_char:Unicode.Scalar) -> (Unicode.Scalar, [Unicode.Scalar])?
+    {
+        var buffer:[Unicode.Scalar] = [name_start_char]
+        while let u:Unicode.Scalar = self.next()
+        {
+            if u.is_xml_name
+            {
+                buffer.append(u)
+            }
+            else
+            {
+                return (u, buffer)
+            }
+        }
+
+        return nil
+    }
+
+    mutating // starts with [whitespace]
+    func read_spaces(after _:Unicode.Scalar) -> Unicode.Scalar?
+    {
+        while let u:Unicode.Scalar = self.next()
+        {
+            if !u.is_xml_whitespace
+            {
+                return u
+            }
+        }
+
+        return nil
+    }
+
+    mutating // starts with "\"" or "'"
+    func read_attribute_value(after quote:Unicode.Scalar) -> (Unicode.Scalar, [Unicode.Scalar])?
+    {
+        var buffer:[Unicode.Scalar] = []
+        while let u:Unicode.Scalar = self.next()
+        {
+            if u == quote
+            {
+                return (u, buffer)
+            }
+            else
+            {
+                buffer.append(u)
+            }
+        }
+
+        return nil
+    }
+
+    mutating // starts with [whitespace]
+    func read_attribute_vector<P>(after first:Unicode.Scalar, sending_errors_to parser:inout P) -> (Unicode.Scalar, [String: String]?)? where P:XMLParser
+    {
+
+        var attributes:[String: String] = [:],
+            u:Unicode.Scalar            = first
+
+        while true
+        {
+            // space1
+            guard let u_after_space1:Unicode.Scalar = self.read_spaces(after: u)
+            else
+            {
+                return nil
+            }
+
+            // name
+            guard u_after_space1.is_xml_name_start
+            else
+            {
+                return (u_after_space1, attributes)
+            }
+
+            guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = self.read_name(after: u_after_space1)
+            else
+            {
+                return nil
+            }
+
+            // space2 ?
+            let u_after_space2:Unicode.Scalar
+            if u_after_name.is_xml_whitespace
+            {
+                guard let u_after_space:Unicode.Scalar = self.read_spaces(after: u_after_name)
+                else
+                {
+                    return nil
+                }
+                u_after_space2 = u_after_space
+            }
+            else
+            {
+                u_after_space2 = u_after_name
+            }
+
+            // equals
+            guard u_after_space2 == "="
+            else
+            {
+                parser.handle_error("expected '=' after attribute name \(String(name))", line: self.l, column: self.k)
+                return (u_after_space2, nil)
+            }
+            guard let u_after_equals:Unicode.Scalar = self.next()
+            else
+            {
+                return nil
+            }
+
+            // space3?
+            let u_after_space3:Unicode.Scalar
+            if u_after_equals.is_xml_whitespace
+            {
+                guard let u_after_space:Unicode.Scalar = self.read_spaces(after: u_after_equals)
+                else
+                {
+                    return nil
+                }
+                u_after_space3 = u_after_space
+            }
+            else
+            {
+                u_after_space3 = u_after_name
+            }
+
+            // value
+            guard u_after_space3 == "\"" || u_after_space3 == "'"
+            else
+            {
+                parser.handle_error("expected ''' or '\"' after attribute name \(String(name))=", line: self.l, column: self.k)
+                return (u_after_space3, nil)
+            }
+            guard let (u_after_value, value):(Unicode.Scalar, [Unicode.Scalar]) = self.read_attribute_value(after: u_after_space3)
+            else
+            {
+                return nil
+            }
+
+            attributes[String(name)] = String(value)
+
+            // space 1
+            guard u_after_value.is_xml_whitespace
+            else
+            {
+                return (u_after_value, attributes)
+            }
+
+            u = u_after_value
+        }
+    }
+}
+
+enum _State
+{
+    case initial,
+         angle,
+         data(Unicode.Scalar),
+         revert(String.UnicodeScalarView.Index)
+}
+
+public
+func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) where P:XMLParser
+{
+    var iterator:UnicodeScalarBacktrackingIterator = UnicodeScalarBacktrackingIterator(unicode_scalars)
+
+    var state:_State = .initial
+
+    fsm: while true
+    {
+        switch state
+        {
+        case .initial:
+            guard let u:Unicode.Scalar = iterator.next()
+            else
+            {
+                return
+            }
+
+            state = u == "<" ? .angle : .data(u)
+
+        case .angle:
+            let bracket_index:String.UnicodeScalarView.Index = iterator.position
+
+            guard let u_after_angle:Unicode.Scalar = iterator.next()
+            else
+            {
+                parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                return
+            }
+
+            if u_after_angle.is_xml_name_start
+            {
+                guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_angle)
+                else
+                {
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                    return
+                }
+
+                guard let (u_after_attributes, attributes_ret):(Unicode.Scalar, [String: String]?) =
+                u_after_name.is_xml_whitespace ? iterator.read_attribute_vector(after: u_after_name, sending_errors_to: &parser) : (u_after_name, [:])
+                else
+                {
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                    return
+                }
+
+                guard let attributes:[String: String] = attributes_ret
+                else
+                {
+                    state = .revert(bracket_index) // syntax error, drop to data
+                    continue
+                }
+
+                if u_after_attributes == ">"
+                {
+                    parser.handle_tag_start(name: String(name), namespace_uri: nil, attributes: attributes, level: 0)
+                }
+                else if u_after_attributes == "/"
+                {
+                    guard let u_after_slash:Unicode.Scalar = iterator.next()
+                    else
+                    {
+                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                        return
+                    }
+                    guard u_after_slash == ">"
+                    else
+                    {
+                        parser.handle_error("expected '>' after empty tag break '/'", line: iterator.l, column: iterator.k)
+                        state = .revert(bracket_index) // syntax error, drop to data
+                        continue
+                    }
+
+                    parser.handle_tag_start_end(name: String(name), namespace_uri: nil, attributes: attributes, level: 0)
+                }
+            }
+            else if u_after_angle == "/"
+            {
+                guard let (u_after_name, name):(Unicode.Scalar, [Unicode.Scalar]) = iterator.read_name(after: u_after_angle)
+                else
+                {
+                    parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                    return
+                }
+
+                // space ?
+                let u_after_space1:Unicode.Scalar
+                if u_after_name.is_xml_whitespace
+                {
+                    guard let u_after_space:Unicode.Scalar = iterator.read_spaces(after: u_after_name)
+                    else
+                    {
+                        parser.handle_error("unexpected EOF inside markup structure", line: iterator.l, column: iterator.k)
+                        return
+                    }
+                    u_after_space1 = u_after_space
+                }
+                else
+                {
+                    u_after_space1 = u_after_name
+                }
+
+                guard u_after_space1 == ">"
+                else
+                {
+                    parser.handle_error("expected '>' after end tag name \(String(name))", line: iterator.l, column: iterator.k)
+                    state = .revert(bracket_index) // syntax error, drop to data
+                    continue
+                }
+
+                parser.handle_tag_end(name: String(name), namespace_uri: nil, level: 0)
+            }
+            else
+            {
+                parser.handle_error("unexpected '\(u_after_angle)'", line: iterator.l, column: iterator.k)
+                state = .revert(bracket_index) // syntax error, drop to data
+                continue
+            }
+
+            state = .initial
+
+        case .data(let first):
+            var buffer:[Unicode.Scalar] = [first]
+            while let u:Unicode.Scalar = iterator.next()
+            {
+                guard u != "<"
+                else
+                {
+                    parser.handle_data(data: buffer, level: 0)
+                    state = .angle
+                    continue fsm
+                }
+
+                buffer.append(u)
+            }
+
+            parser.handle_data(data: buffer, level: 0)
+            return
+
+        case .revert(let index):
+            iterator.reset(to: index)
+            state = .data("<")
+        }
+    }
+}
+
+
 enum State
 {
     case outer_save(Unicode.Scalar), tag, e_tag, name_save(Unicode.Scalar)

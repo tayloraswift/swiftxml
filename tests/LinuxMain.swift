@@ -6,7 +6,7 @@ let test_cases:[(String, [Token])] =
 ("", []),
 ("data", [.data("data")]),
 ("<doc1>", [.open(name: "doc1", is_sc: false, attrs: [:])]),
-("< doc2 >", [.open(name: "doc2", is_sc: false, attrs: [:])]),
+("< doc2 >", [.error("unexpected ' '", 0, 1), .data("< doc2 >")]),
 ("</doc3/>", [.error("invalid character '/' in tag 'doc3'", 0, 6), .error("invalid tag 'doc3' dropped", 0, 7)]),
 ("</doc4 >", [.close(name: "doc4")]),
 ("<doc5  /  >", [.open(name: "doc5", is_sc: true, attrs: [:])]),

@@ -103,7 +103,7 @@ func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true) 
     var passed:Int = 0
     for (i, (test_case, expected_result)) in test_cases.enumerated()
     {
-        test_parser.parse(test_case)
+        read_markup(unicode_scalars: test_case.unicodeScalars, parser: &test_parser)
         //print(test_parser.output.map{String(describing: $0)}.joined(separator: "\n"))
         //print()
         if test_parser.output == expected_result

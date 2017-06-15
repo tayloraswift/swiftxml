@@ -529,6 +529,27 @@ func read_markup<P>(unicode_scalars:String.UnicodeScalarView, parser:inout P) wh
                         continue
                     }
                 }
+                else if u_after_exclam == "["
+                {
+                    guard let (u_after_str, match):(Unicode.Scalar, Bool) = iterator.read_string(["[", "C", "D", "A", "T", "A"], after: u_after_exclam)
+                    else
+                    {
+                        parser.eof(iterator: iterator)
+                        return
+                    }
+
+                    guard match
+                    else
+                    {
+                        parser.handle_error("unexpected '\(u_after_str)' in CDATA marker", line: iterator.l, column: iterator.k)
+                        state = .revert(iterator_state)
+                        continue
+                    }
+
+                    parser.handle_error("CDATA sections are unsupported", line: iterator.l, column: iterator.k)
+                    state = .revert(iterator_state)
+                    continue
+                }
                 else if u_after_exclam == "E"
                 {
                     guard let (u_after_str, match):(Unicode.Scalar, Bool) = iterator.read_string(["E", "L", "E", "M", "E", "N", "T"], after: u_after_exclam)

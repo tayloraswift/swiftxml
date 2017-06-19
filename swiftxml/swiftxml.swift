@@ -122,6 +122,64 @@ enum Markup
          processing
 }
 
+extension String.UnicodeScalarView.Iterator
+{
+    mutating
+    func read_reference() -> (after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?)
+    {
+        enum ReferenceState
+        {
+        case initial, name(Unicode.Scalar), hashtag, x, decimal, hex, semicolon
+        }
+
+        let default_entities:[String: [Unicode.Scalar]] = ["amp": ["&"], "lt": ["<"], "gt": [">"], "apos": ["'"], "quot": ["\""]]
+
+        var state:ReferenceState     = .initial,
+            content:[Unicode.Scalar] = []
+
+        while let u:Unicode.Scalar = self.next()
+        {
+            switch state
+            {
+            case .initial:
+                if u == "#"
+                {
+                    state = .hashtag
+                }
+                else if u.is_xml_name_start
+                {
+                    state = .name(u)
+                }
+                else
+                {
+                    return (u, ["&"], "unescaped ampersand '&'")
+                }
+
+            case .name(let u_previous):
+                content.append(u_previous)
+                if u.is_xml_name
+                {
+                    state = .name(u)
+                }
+                else if u == ";"
+                {
+                    content = default_entities[String(content)] ?? ["&"] + content + [";"]
+                    state   = .semicolon
+                }
+                else
+                {
+                    return (u, ["&"] + content, "unexpected '\(u)' in entity reference")
+                }
+            default:
+                break
+            }
+        }
+
+        return (nil, [], nil)
+    }
+}
+
+
 public
 extension XMLParser
 {
@@ -199,6 +257,7 @@ extension XMLParser
             name_buffer:[Unicode.Scalar]    = [],
             label_buffer:[Unicode.Scalar]   = [],
             value_buffer:[Unicode.Scalar]   = [],
+            entity_buffer:[Unicode.Scalar]  = [],
             attributes:[String: String]     = [:],
             string_delimiter:Unicode.Scalar = "\0"
 
@@ -274,6 +333,10 @@ extension XMLParser
                     data_buffer = []
                     state = .begin_markup
                 }
+                //else if u == "&"
+                //{
+                //    state = .entity
+            //}
                 else
                 {
                     state = .data(u)

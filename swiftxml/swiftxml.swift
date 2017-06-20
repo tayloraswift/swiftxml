@@ -78,7 +78,7 @@ extension Unicode.Scalar
 
 extension String
 {
-    init(_ buffer:[Unicode.Scalar])
+    init<C>(_ buffer:C) where C:Collection, C.Element == Unicode.Scalar
     {
         self.init(buffer.map(Character.init))
     }
@@ -129,13 +129,37 @@ extension String.UnicodeScalarView.Iterator
     {
         enum ReferenceState
         {
-        case initial, name(Unicode.Scalar), hashtag, x, decimal, hex, semicolon
+        case initial,
+             name,
+             hashtag,
+             x,
+             decimal(UInt32),
+             hex(UInt32)
         }
 
         let default_entities:[String: [Unicode.Scalar]] = ["amp": ["&"], "lt": ["<"], "gt": [">"], "apos": ["'"], "quot": ["\""]]
 
         var state:ReferenceState     = .initial,
-            content:[Unicode.Scalar] = []
+            content:[Unicode.Scalar] = ["&"]
+
+
+        @inline(__always)
+        func _charref(_ u:Unicode.Scalar?, scalar:UInt32) -> (after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?)
+        {
+            guard scalar > 0
+            else
+            {
+                return (u, content, "cannot reference null character '\\0'")
+            }
+
+            guard scalar <= 0xD7FF || 0xE000 ... 0xFFFD ~= scalar || 0x10000 ... 0x10FFFF ~= scalar
+            else
+            {
+                return (u, content, "cannot reference illegal character '\\u{\(scalar)}'")
+            }
+
+            return (u, [Unicode.Scalar(scalar)!], nil)
+        }
 
         while let u:Unicode.Scalar = self.next()
         {
@@ -148,34 +172,101 @@ extension String.UnicodeScalarView.Iterator
                 }
                 else if u.is_xml_name_start
                 {
-                    state = .name(u)
+                    state = .name
                 }
                 else
                 {
-                    return (u, ["&"], "unescaped ampersand '&'")
+                    return (u, content, "unescaped ampersand '&'")
                 }
 
-            case .name(let u_previous):
-                content.append(u_previous)
-                if u.is_xml_name
+            case .name:
+                if u == ";"
                 {
-                    state = .name(u)
+                    content = default_entities[String(content.dropFirst())] ?? content
+                    return (self.next(), content, nil)
+                }
+                else
+                {
+                    guard u.is_xml_name
+                    else
+                    {
+                        return (u, content, "unexpected '\(u)' in entity reference")
+                    }
+                }
+
+            case .hashtag:
+                if "0" ... "9" ~= u
+                {
+                    state = .decimal(u.value - Unicode.Scalar("0").value)
+                }
+                else if u == "x"
+                {
+                    state = .x
+                }
+                else
+                {
+                    return (u, content, "unexpected '\(u)' in character reference")
+                }
+
+            case .decimal(let scalar):
+                if "0" ... "9" ~= u
+                {
+                    state = .decimal(u.value - Unicode.Scalar("0").value + 10 * scalar)
                 }
                 else if u == ";"
                 {
-                    content = default_entities[String(content)] ?? ["&"] + content + [";"]
-                    state   = .semicolon
+                    return _charref(self.next(), scalar: scalar)
                 }
                 else
                 {
-                    return (u, ["&"] + content, "unexpected '\(u)' in entity reference")
+                    return (u, content, "unexpected '\(u)' in character reference")
                 }
-            default:
-                break
+
+            case .x:
+                if "0" ... "9" ~= u
+                {
+                    state = .hex(u.value - Unicode.Scalar("0").value)
+                }
+                else if "a" ... "f" ~= u
+                {
+                    state = .hex(u.value - Unicode.Scalar("a").value)
+                }
+                else if "A" ... "F" ~= u
+                {
+                    state = .hex(u.value - Unicode.Scalar("A").value)
+                }
+                else
+                {
+                    return (u, content, "unexpected '\(u)' in character reference")
+                }
+
+            case .hex(let scalar):
+                if "0" ... "9" ~= u
+                {
+                    state = .hex(u.value - Unicode.Scalar("0").value + scalar << 4)
+                }
+                else if "a" ... "f" ~= u
+                {
+                    state = .hex(u.value - Unicode.Scalar("a").value + scalar << 4)
+                }
+                else if "A" ... "F" ~= u
+                {
+                    state = .hex(u.value - Unicode.Scalar("A").value + scalar << 4)
+                }
+                else if u == ";"
+                {
+                    return _charref(self.next(), scalar: scalar)
+                }
+                else
+                {
+                    return (u, content, "unexpected '\(u)' in character reference")
+                }
             }
+
+            content.append(u)
         }
 
-        return (nil, [], nil)
+        return (nil, content, "unexpected EOF inside reference")
     }
 }
 
@@ -325,6 +416,7 @@ extension XMLParser
 
             case .data(let u_previous):
                 data_buffer.append(u_previous)
+
                 if u == "<"
                 {
                     iterator_checkpoint = iterator
@@ -335,8 +427,10 @@ extension XMLParser
                 }
                 //else if u == "&"
                 //{
-                //    state = .entity
-            //}
+                //    let reference:(after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?) = iterator.read_reference()
+                //    data_buffer.append(contentsOf: content.dropLast())
+                //    state = .data(content.last!)
+                //}
                 else
                 {
                     state = .data(u)

@@ -122,6 +122,27 @@ enum Markup
          processing
 }
 
+struct Position
+{
+    var line:Int = 0,
+        column:Int = 0
+
+    @inline(__always)
+    mutating
+    func advance(_ u:Unicode.Scalar)
+    {
+        if u == "\n"
+        {
+            self.line   += 1
+            self.column  = 0
+        }
+        else
+        {
+            self.column += 1
+        }
+    }
+}
+
 extension String.UnicodeScalarView.Iterator
 {
     mutating
@@ -350,8 +371,8 @@ extension XMLParser
             attributes:[String: String]     = [:],
             string_delimiter:Unicode.Scalar = "\0"
 
-        var position:(l:Int, k:Int)            = (0, 0),
-            position_checkpoint:(l:Int, k:Int) = position
+        var position:Position            = Position(),
+            position_checkpoint:Position = position
 
         @inline(__always)
         func _emit_tag()
@@ -391,17 +412,9 @@ extension XMLParser
         }
 
         @inline(__always)
-        func _advance_counter(_ u:Unicode.Scalar)
+        func _error(_ message:String)
         {
-            if u == "\n"
-            {
-                position.l += 1
-                position.k  = 0
-            }
-            else
-            {
-                position.k += 1
-            }
+            self.handle_error(message, line: position.line, column: position.column)
         }
 
         while let u:Unicode.Scalar = iterator.next()
@@ -447,7 +460,7 @@ extension XMLParser
                         u_next = iterator.next()
                     }
 
-                    _advance_counter(u_current)
+                    position.advance(u_current)
                     guard let u_after:Unicode.Scalar = u_next
                     else
                     {
@@ -483,8 +496,7 @@ extension XMLParser
                 }
                 else
                 {
-                    self.handle_error("unexpected '\(u)' after left angle bracket '<'",
-                                        line: position.l, column: position.k)
+                    _error("unexpected '\(u)' after left angle bracket '<'")
                     _reset()
                     continue
                 }
@@ -494,9 +506,8 @@ extension XMLParser
                 guard u.is_xml_name_start
                 else
                 {
-                    self.handle_error("unexpected '\(u)' in end tag ''",
-                                        line: position.l, column: position.k)
-                    _reset() // syntax error, drop to data
+                    _error("unexpected '\(u)' in end tag ''")
+                    _reset()
                     continue
                 }
 
@@ -526,8 +537,7 @@ extension XMLParser
                     }
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in start tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -544,8 +554,7 @@ extension XMLParser
                     }
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in end tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in end tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -562,8 +571,7 @@ extension XMLParser
                     }
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in processing instruction '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in processing instruction '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -587,8 +595,7 @@ extension XMLParser
                     guard u.is_xml_whitespace
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in start tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -606,13 +613,11 @@ extension XMLParser
                     {
                         if u.is_xml_name_start
                         {
-                            self.handle_error("end tag '\(String(name_buffer))' cannot contain attributes",
-                                                line: position.l, column: position.k)
+                            _error("end tag '\(String(name_buffer))' cannot contain attributes")
                         }
                         else
                         {
-                            self.handle_error("unexpected '\(u)' in end tag '\(String(name_buffer))'",
-                                                line: position.l, column: position.k)
+                            _error("unexpected '\(u)' in end tag '\(String(name_buffer))'")
                         }
                         _reset()
                         continue
@@ -635,8 +640,7 @@ extension XMLParser
                     guard u.is_xml_whitespace
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in start tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -654,8 +658,7 @@ extension XMLParser
                     guard u.is_xml_whitespace
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in start tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -672,8 +675,7 @@ extension XMLParser
                     guard u.is_xml_whitespace
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in start tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -692,8 +694,7 @@ extension XMLParser
                     guard u.is_xml_whitespace
                     else
                     {
-                        self.handle_error("unexpected '\(u)' in start tag '\(String(name_buffer))'",
-                                            line: position.l, column: position.k)
+                        _error("unexpected '\(u)' in start tag '\(String(name_buffer))'")
                         _reset()
                         continue
                     }
@@ -708,7 +709,7 @@ extension XMLParser
                     guard attributes[label_str] == nil
                     else
                     {
-                        self.handle_error("redefinition of attribute '\(label_str)'", line: position.l, column: position.k)
+                        _error("redefinition of attribute '\(label_str)'")
                         _reset()
                         continue
                     }
@@ -729,8 +730,7 @@ extension XMLParser
                 guard u == ">"
                 else
                 {
-                    self.handle_error("unexpected '\(u)' in empty tag '\(String(name_buffer))'",
-                                        line: position.l, column: position.k)
+                    _error("unexpected '\(u)' in empty tag '\(String(name_buffer))'")
                     _reset()
                     continue
                 }
@@ -744,7 +744,7 @@ extension XMLParser
                 }
                 else
                 {
-                    self.handle_error("XML declarations are unsupported", line: position.l, column: position.k)
+                    _error("XML declarations are unsupported")
                     _reset()
                     continue
                 }
@@ -753,7 +753,7 @@ extension XMLParser
                 guard u == "-"
                 else
                 {
-                    self.handle_error("unexpected '\(u)' after '<!-'", line: position.l, column: position.k)
+                    _error("unexpected '\(u)' after '<!-'")
                     _reset()
                     continue
                 }
@@ -782,7 +782,7 @@ extension XMLParser
                 else
                 {
                     self.handle_error("unexpected double hyphen '--' inside comment body",
-                                        line: position.l, column: position.k - 1)
+                                      line: position.line, column: position.column - 1)
                     _reset()
                     continue
                 }
@@ -794,7 +794,7 @@ extension XMLParser
                 guard u.is_xml_name_start
                 else
                 {
-                    self.handle_error("unexpected '\(u)' after '<?'", line: position.l, column: position.k)
+                    _error("unexpected '\(u)' after '<?'")
                     _reset()
                     continue
                 }
@@ -834,7 +834,7 @@ extension XMLParser
                 }
             }
 
-            _advance_counter(u)
+            position.advance(u)
         }
 
         switch state
@@ -842,8 +842,7 @@ extension XMLParser
         case .end_markup:
             _emit_tag()
         default:
-            self.handle_error("unexpected end of stream inside markup structure",
-                                line: position.l, column: position.k)
+            _error("unexpected end of stream inside markup structure")
         }
     }
 

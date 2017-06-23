@@ -344,11 +344,9 @@ extension XMLParser
             iterator:String.UnicodeScalarView.Iterator = str.unicodeScalars.makeIterator(),
             iterator_checkpoint:String.UnicodeScalarView.Iterator = iterator
 
-        var data_buffer:[Unicode.Scalar]    = [],
-            name_buffer:[Unicode.Scalar]    = [],
+        var name_buffer:[Unicode.Scalar]    = [],
             label_buffer:[Unicode.Scalar]   = [],
             value_buffer:[Unicode.Scalar]   = [],
-            entity_buffer:[Unicode.Scalar]  = [],
             attributes:[String: String]     = [:],
             string_delimiter:Unicode.Scalar = "\0"
 
@@ -392,9 +390,23 @@ extension XMLParser
             state = .data("<")
         }
 
+        @inline(__always)
+        func _advance_counter(_ u:Unicode.Scalar)
+        {
+            if u == "\n"
+            {
+                position.l += 1
+                position.k  = 0
+            }
+            else
+            {
+                position.k += 1
+            }
+        }
+
         while let u:Unicode.Scalar = iterator.next()
         {
-            switch state
+            fsm: switch state
             {
             case .end_markup:
                 _emit_tag()
@@ -415,26 +427,41 @@ extension XMLParser
                 }
 
             case .data(let u_previous):
-                data_buffer.append(u_previous)
+                var data_buffer:[Unicode.Scalar] = [u_previous],
+                    u_current:Unicode.Scalar     = u
 
-                if u == "<"
+                while u_current != "<"
                 {
-                    iterator_checkpoint = iterator
-                    position_checkpoint = position
-                    self.handle_data(data: data_buffer)
-                    data_buffer = []
-                    state = .begin_markup
+                    let u_next:Unicode.Scalar?
+                    if u_current == "&"
+                    {
+                        let content:[Unicode.Scalar],
+                            error:String?
+                        (u_next, content, error) = iterator.read_reference()
+                        data_buffer.append(contentsOf: content)
+                        // TODO: check error and report line number
+                    }
+                    else
+                    {
+                        data_buffer.append(u_current)
+                        u_next = iterator.next()
+                    }
+
+                    _advance_counter(u_current)
+                    guard let u_after:Unicode.Scalar = u_next
+                    else
+                    {
+                        self.handle_data(data: data_buffer)
+                        state = .end_markup // markup_context will always be .none
+                        break fsm
+                    }
+                    u_current = u_after
                 }
-                //else if u == "&"
-                //{
-                //    let reference:(after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?) = iterator.read_reference()
-                //    data_buffer.append(contentsOf: content.dropLast())
-                //    state = .data(content.last!)
-                //}
-                else
-                {
-                    state = .data(u)
-                }
+
+                iterator_checkpoint = iterator
+                position_checkpoint = position
+                state = .begin_markup
+                self.handle_data(data: data_buffer)
 
             case .begin_markup:
                 markup_context = .start
@@ -807,24 +834,13 @@ extension XMLParser
                 }
             }
 
-            if u == "\n"
-            {
-                position.l += 1
-                position.k  = 0
-            }
-            else
-            {
-                position.k += 1
-            }
+            _advance_counter(u)
         }
 
         switch state
         {
         case .end_markup:
             _emit_tag()
-        case .data(let u_final):
-            data_buffer.append(u_final)
-            self.handle_data(data: data_buffer)
         default:
             self.handle_error("unexpected end of stream inside markup structure",
                                 line: position.l, column: position.k)

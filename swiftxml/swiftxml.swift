@@ -370,7 +370,6 @@ extension XMLParser
 
         var name_buffer:[Unicode.Scalar]    = [],
             label_buffer:[Unicode.Scalar]   = [],
-            value_buffer:[Unicode.Scalar]   = [],
             attributes:[String: String]     = [:],
             string_delimiter:Unicode.Scalar = "\0"
 
@@ -393,8 +392,8 @@ extension XMLParser
             case .comment:
                 break
             case .processing:
-                self.handle_processing_instruction(target: String(name_buffer), data: value_buffer)
-                value_buffer = []
+                self.handle_processing_instruction(target: String(name_buffer), data: label_buffer)
+                label_buffer = []
             }
         }
 
@@ -421,7 +420,6 @@ extension XMLParser
 
                 name_buffer      = []
                 label_buffer     = []
-                value_buffer     = []
                 attributes       = [:]
                 string_delimiter = "\0"
 
@@ -728,29 +726,57 @@ extension XMLParser
                 }
 
             case .attribute_value:
-                if u == string_delimiter
-                {
-                    string_delimiter = "\0"
-                    let label_str:String = String(label_buffer)
+                var u_current:Unicode.Scalar      = u,
+                    value_buffer:[Unicode.Scalar] = []
 
-                    guard attributes[label_str] == nil
+                while u_current != string_delimiter
+                {
+                    let u_next:Unicode.Scalar?
+                    if u_current == "&"
+                    {
+                        let content:[Unicode.Scalar],
+                            error:String?
+                        (u_next, content, error) = iterator.read_reference(position: &position)
+                        value_buffer.append(contentsOf: content)
+
+                        position.advance(u_current)
+
+                        if let error_message:String = error
+                        {
+                            _error(error_message)
+                        }
+                    }
                     else
                     {
-                        _error("redefinition of attribute '\(label_str)'")
-                        _reset()
-                        continue
+                        value_buffer.append(u_current)
+                        u_next = iterator.next()
+                        position.advance(u_current)
                     }
 
-                    attributes[label_str] = String(value_buffer)
-                    label_buffer = []
-                    value_buffer = []
-
-                    state = .attributes
+                    guard let u_after:Unicode.Scalar = u_next
+                    else
+                    {
+                        break fsm
+                    }
+                    u_current = u_after
                 }
+
+                string_delimiter = "\0"
+                let label_str:String = String(label_buffer)
+
+                guard attributes[label_str] == nil
                 else
                 {
-                    value_buffer.append(u)
+                    _error("redefinition of attribute '\(label_str)'")
+                    _reset()
+                    continue
                 }
+
+                attributes[label_str] = String(value_buffer)
+                label_buffer = []
+                value_buffer = []
+
+                state = .attributes
 
             case .slash2:
                 markup_context = .empty
@@ -839,7 +865,7 @@ extension XMLParser
                 }
 
             case .pi_data(let u_previous):
-                value_buffer.append(u_previous)
+                label_buffer.append(u_previous)
                 if u == "?"
                 {
                     state = .question2
@@ -856,7 +882,7 @@ extension XMLParser
                 }
                 else
                 {
-                    value_buffer.append("?")
+                    label_buffer.append("?")
                     state = .pi_data(u)
                 }
             }

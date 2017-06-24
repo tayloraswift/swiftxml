@@ -61,6 +61,8 @@ let test_cases:[(String, [Token])] =
                         .data("&#0000;"), .close(name: "doc")]),
 ("<doc>&#xFFFF;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .error("cannot reference illegal character '\\u{65535}'", 0, 12),
                          .data("&#xFFFF;"), .close(name: "doc")]),
+("<doc attr='&#128082;'/>", [.open(name: "doc", is_sc: true, attrs: ["attr": "👒"])]),
+("<doc attr='& #128082;'/>", [.error("unescaped ampersand '&'", 0, 12), .open(name: "doc", is_sc: true, attrs: ["attr": "& #128082;"])]),
 ]
 
 exit(run_tests(cases: test_cases) ? 0 : 1)

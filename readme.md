@@ -37,6 +37,11 @@ extension XMLParser
 }
 ```
 
+Import the package with 
+```swift
+import XML
+```
+
 Supported XML features:
 
 - [x] parse start, empty, and end tags, and XML data

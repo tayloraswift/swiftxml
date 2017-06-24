@@ -8,7 +8,7 @@
 
 **Lightweight XML parsing in *pure* Swift 4. No Foundation. No dependencies.**
 
-SwiftXML doesn’t wrap anything. It parses XML directly, character by character. And the API is simple and easy to use:
+SwiftXML is an event-driven XML parser intended to replace the Foundation (`NS`)`XMLParser` class. SwiftXML works on Linux. SwiftXML doesn’t wrap anything. It parses XML directly, character by character. And the API is simple and easy to use:
 
 ```swift
 protocol XMLParser

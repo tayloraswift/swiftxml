@@ -39,7 +39,7 @@ extension XMLParser
 
 Supported XML features:
 
-- [x] parse start, empty, and end tags, and xml data
+- [x] parse start, empty, and end tags, and XML data
 - [x] unescape XML default entity references (`&lt;`, `&gt;`, `&apos;`, `&quot;`, `&amp;`) in text data
 - [x] unescape XML default entity references (`&lt;`, `&gt;`, `&apos;`, `&quot;`, `&amp;`) in attribute data
 - [x] unescape XML character references in text data

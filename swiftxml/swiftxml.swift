@@ -158,14 +158,15 @@ extension String.UnicodeScalarView.Iterator
              hex(UInt32)
         }
 
-        let default_entities:[String: [Unicode.Scalar]] = ["amp": ["&"], "lt": ["<"], "gt": [">"], "apos": ["'"], "quot": ["\""]]
+        let default_entities:[String: [Unicode.Scalar]] =
+        ["amp": ["&"], "lt": ["<"], "gt": [">"], "apos": ["'"], "quot": ["\""]]
 
         var state:ReferenceState     = .initial,
             content:[Unicode.Scalar] = ["&"]
 
 
         @inline(__always)
-        func _charref(_ u:Unicode.Scalar?, scalar:UInt32) -> (after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?)
+        func _charref(_ u:Unicode.Scalar, scalar:UInt32) -> (after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?)
         {
             guard scalar > 0
             else
@@ -179,7 +180,8 @@ extension String.UnicodeScalarView.Iterator
                 return (u, content, "cannot reference illegal character '\\u{\(scalar)}'")
             }
 
-            return (u, [Unicode.Scalar(scalar)!], nil)
+            position.advance(u)
+            return (self.next(), [Unicode.Scalar(scalar)!], nil)
         }
 
         while let u:Unicode.Scalar = self.next()
@@ -237,8 +239,7 @@ extension String.UnicodeScalarView.Iterator
                 }
                 else if u == ";"
                 {
-                    position.advance(u)
-                    return _charref(self.next(), scalar: scalar)
+                    return _charref(u, scalar: scalar)
                 }
                 else
                 {
@@ -278,8 +279,7 @@ extension String.UnicodeScalarView.Iterator
                 }
                 else if u == ";"
                 {
-                    position.advance(u)
-                    return _charref(self.next(), scalar: scalar)
+                    return _charref(u, scalar: scalar)
                 }
                 else
                 {
@@ -294,7 +294,6 @@ extension String.UnicodeScalarView.Iterator
         return (nil, content, "unexpected EOF inside reference")
     }
 }
-
 
 public
 extension XMLParser
@@ -474,6 +473,8 @@ extension XMLParser
                         (u_next, content, error) = iterator.read_reference(position: &position)
                         data_buffer.append(contentsOf: content)
 
+                        position.advance(u_current)
+
                         if let error_message:String = error
                         {
                             _error(error_message)
@@ -483,9 +484,9 @@ extension XMLParser
                     {
                         data_buffer.append(u_current)
                         u_next = iterator.next()
+                        position.advance(u_current)
                     }
 
-                    position.advance(u_current)
                     guard let u_after:Unicode.Scalar = u_next
                     else
                     {

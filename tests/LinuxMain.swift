@@ -43,7 +43,24 @@ let test_cases:[(String, [Token])] =
 
 ("<doc>*you&apos;re</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("*you're"), .close(name: "doc")]),
 ("<doc>&#128082;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("👒"), .close(name: "doc")]),
-("<doc>&#x1F452;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("👒"), .close(name: "doc")])
+("<doc>&#x1F452;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("👒"), .close(name: "doc")]),
+("<doc>&#x1f452;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("👒"), .close(name: "doc")]),
+("<doc>&#x 1f452;</doc><>", [.open(name: "doc", is_sc: false, attrs: [:]),
+                           .error("unexpected ' ' in character reference", 0, 8),
+                           .data("&#x 1f452;"), .close(name: "doc"), .error("unexpected '>' after left angle bracket '<'", 0, 22),
+                           .data("<>")]),
+("<doc>&#x1\nf452;</doc><>", [.open(name: "doc", is_sc: false, attrs: [:]),
+                             .error("unexpected '\n' in character reference", 0, 9),
+                             .data("&#x1\nf452;"), .close(name: "doc"), .error("unexpected '>' after left angle bracket '<'", 1, 12),
+                             .data("<>")]),
+("<doc>&#x1f45 2;</doc><>", [.open(name: "doc", is_sc: false, attrs: [:]),
+                           .error("unexpected ' ' in character reference", 0, 12),
+                           .data("&#x1f45 2;"), .close(name: "doc"), .error("unexpected '>' after left angle bracket '<'", 0, 22),
+                           .data("<>")]),
+("<doc>&#0000;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .error("cannot reference null character '\\0'", 0, 11),
+                        .data("&#0000;"), .close(name: "doc")]),
+("<doc>&#xFFFF;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .error("cannot reference illegal character '\\u{65535}'", 0, 12),
+                         .data("&#xFFFF;"), .close(name: "doc")]),
 ]
 
 exit(run_tests(cases: test_cases) ? 0 : 1)

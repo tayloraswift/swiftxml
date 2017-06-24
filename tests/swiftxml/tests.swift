@@ -89,7 +89,7 @@ struct HTMLParser:XMLParser
     }
 
     mutating
-    func handle_processing_instruction(target:String, data: [Unicode.Scalar])
+    func handle_processing_instruction(target:String, data:[Unicode.Scalar])
     {
         self.output.append(.pi(target, String(data.map(Character.init))))
     }
@@ -148,7 +148,7 @@ func run_tests(cases test_cases:[(String, [Token])], print_correct:Bool = true) 
     print(test_parser.output[0 ... 13])
     print(test_parser.output.count)
     */
-    
+
     if !test_cases.isEmpty
     {
         print("\u{001B}[1;32m\(passed)/\(test_cases.count) passed\u{1B}[0m")

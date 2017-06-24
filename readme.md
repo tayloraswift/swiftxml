@@ -37,6 +37,23 @@ extension XMLParser
 }
 ```
 
-SwiftXML will tokenize your XML string into tags and data. It does not build any tree structures; that is for you to implement.
+Supported XML features:
+
+- [x] parse start, empty, and end tags, and xml data
+- [x] unescape XML default entity references (`&lt;`, `&gt;`, `&apos;`, `&quot;`, `&amp;`) in text data
+- [x] unescape XML default entity references (`&lt;`, `&gt;`, `&apos;`, `&quot;`, `&amp;`) in attribute data
+- [x] unescape XML character references in text data
+- [x] unescape XML character references in attribute data
+- [x] parse XML processing instructions
+- [x] parse XML comments
+- [ ] expose XML comments
+- [ ] parse XML `CDATA` sections 
+- [ ] parse XML entity declarations 
+- [ ] parse XML element type declarations 
+- [ ] parse XML attribute list declarations 
+- [ ] parse and validate XML namespaces
+- [x] expose syntax error line and column numbers
+
+SwiftXML will tokenize your XML string into tags and data. It does not build any tree structures.
 
 See the [`tests.swift`](tests/swiftxml/tests.swift) file for a usage example.

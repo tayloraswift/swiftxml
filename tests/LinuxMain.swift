@@ -39,7 +39,11 @@ let test_cases:[(String, [Token])] =
 ("<doc attr#='value'/ \">\" q/><body>",
     [.error("unexpected '#' in start tag 'doc'", 0, 9), .data("<doc attr#='value'/ \">\" q/>"), .open(name: "body", is_sc: false, attrs: [:])]),
 ("<doc><!-- a comment --></doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .close(name: "doc")]),
-("<doc <!-- a comment -->></doc>", [.error("unexpected '<' in start tag 'doc'", 0, 5), .data("<doc "), .data(">"), .close(name: "doc")])
+("<doc <!-- a comment -->></doc>", [.error("unexpected '<' in start tag 'doc'", 0, 5), .data("<doc "), .data(">"), .close(name: "doc")]),
+
+("<doc>*you&apos;re</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("*you're"), .close(name: "doc")]),
+("<doc>&#128082;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("👒"), .close(name: "doc")]),
+("<doc>&#x1F452;</doc>", [.open(name: "doc", is_sc: false, attrs: [:]), .data("👒"), .close(name: "doc")])
 ]
 
 exit(run_tests(cases: test_cases) ? 0 : 1)

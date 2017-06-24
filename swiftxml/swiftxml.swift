@@ -86,7 +86,7 @@ extension String
 
 enum State
 {
-    case data(Unicode.Scalar),
+    case data(Unicode.Scalar?),
          begin_markup,
          slash1,
          name(Unicode.Scalar),
@@ -146,7 +146,7 @@ struct Position
 extension String.UnicodeScalarView.Iterator
 {
     mutating
-    func read_reference() -> (after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?)
+    func read_reference(position:inout Position) -> (after:Unicode.Scalar?, content:[Unicode.Scalar], error:String?)
     {
         enum ReferenceState
         {
@@ -204,6 +204,7 @@ extension String.UnicodeScalarView.Iterator
                 if u == ";"
                 {
                     content = default_entities[String(content.dropFirst())] ?? content
+                    position.advance(u)
                     return (self.next(), content, nil)
                 }
                 else
@@ -236,6 +237,7 @@ extension String.UnicodeScalarView.Iterator
                 }
                 else if u == ";"
                 {
+                    position.advance(u)
                     return _charref(self.next(), scalar: scalar)
                 }
                 else
@@ -250,11 +252,11 @@ extension String.UnicodeScalarView.Iterator
                 }
                 else if "a" ... "f" ~= u
                 {
-                    state = .hex(u.value - Unicode.Scalar("a").value)
+                    state = .hex(10 + u.value - Unicode.Scalar("a").value)
                 }
                 else if "A" ... "F" ~= u
                 {
-                    state = .hex(u.value - Unicode.Scalar("A").value)
+                    state = .hex(10 + u.value - Unicode.Scalar("A").value)
                 }
                 else
                 {
@@ -268,14 +270,15 @@ extension String.UnicodeScalarView.Iterator
                 }
                 else if "a" ... "f" ~= u
                 {
-                    state = .hex(u.value - Unicode.Scalar("a").value + scalar << 4)
+                    state = .hex(10 + u.value - Unicode.Scalar("a").value + scalar << 4)
                 }
                 else if "A" ... "F" ~= u
                 {
-                    state = .hex(u.value - Unicode.Scalar("A").value + scalar << 4)
+                    state = .hex(10 + u.value - Unicode.Scalar("A").value + scalar << 4)
                 }
                 else if u == ";"
                 {
+                    position.advance(u)
                     return _charref(self.next(), scalar: scalar)
                 }
                 else
@@ -284,6 +287,7 @@ extension String.UnicodeScalarView.Iterator
                 }
             }
 
+            position.advance(u)
             content.append(u)
         }
 
@@ -396,29 +400,38 @@ extension XMLParser
         }
 
         @inline(__always)
-        func _reset()
-        {
-            markup_context = .none
-
-            name_buffer      = []
-            label_buffer     = []
-            value_buffer     = []
-            attributes       = [:]
-            string_delimiter = "\0"
-
-            iterator = iterator_checkpoint
-            position = position_checkpoint
-            state = .data("<")
-        }
-
-        @inline(__always)
         func _error(_ message:String)
         {
             self.handle_error(message, line: position.line, column: position.column)
         }
 
-        while let u:Unicode.Scalar = iterator.next()
+        guard var u:Unicode.Scalar = iterator.next()
+        else
         {
+            return
+        }
+
+        var u_checkpoint:Unicode.Scalar = u
+
+        while true
+        {
+            @inline(__always)
+            func _reset()
+            {
+                markup_context = .none
+
+                name_buffer      = []
+                label_buffer     = []
+                value_buffer     = []
+                attributes       = [:]
+                string_delimiter = "\0"
+
+                iterator = iterator_checkpoint
+                position = position_checkpoint
+                u        = u_checkpoint
+                state = .data("<")
+            }
+
             fsm: switch state
             {
             case .end_markup:
@@ -430,18 +443,26 @@ extension XMLParser
 
                 if u == "<"
                 {
-                    iterator_checkpoint = iterator
-                    position_checkpoint = position
                     state = .begin_markup
                 }
                 else
                 {
-                    state = .data(u)
+                    state = .data(nil)
+                    continue
                 }
 
-            case .data(let u_previous):
-                var data_buffer:[Unicode.Scalar] = [u_previous],
-                    u_current:Unicode.Scalar     = u
+            case .data(let u_before):
+                var u_current:Unicode.Scalar = u,
+                    data_buffer:[Unicode.Scalar]
+
+                if let u_previous:Unicode.Scalar = u_before
+                {
+                    data_buffer = [u_previous]
+                }
+                else
+                {
+                    data_buffer = []
+                }
 
                 while u_current != "<"
                 {
@@ -450,9 +471,13 @@ extension XMLParser
                     {
                         let content:[Unicode.Scalar],
                             error:String?
-                        (u_next, content, error) = iterator.read_reference()
+                        (u_next, content, error) = iterator.read_reference(position: &position)
                         data_buffer.append(contentsOf: content)
-                        // TODO: check error and report line number
+
+                        if let error_message:String = error
+                        {
+                            _error(error_message)
+                        }
                     }
                     else
                     {
@@ -471,13 +496,14 @@ extension XMLParser
                     u_current = u_after
                 }
 
-                iterator_checkpoint = iterator
-                position_checkpoint = position
                 state = .begin_markup
                 self.handle_data(data: data_buffer)
 
             case .begin_markup:
-                markup_context = .start
+                iterator_checkpoint = iterator
+                position_checkpoint = position
+                u_checkpoint        = u
+                markup_context      = .start
                 if u.is_xml_name_start
                 {
                     state          = .name(u)
@@ -835,14 +861,19 @@ extension XMLParser
             }
 
             position.advance(u)
-        }
-
-        switch state
-        {
-        case .end_markup:
-            _emit_tag()
-        default:
-            _error("unexpected end of stream inside markup structure")
+            guard let u_after:Unicode.Scalar = iterator.next()
+            else
+            {
+                switch state
+                {
+                case .end_markup:
+                    _emit_tag()
+                default:
+                    _error("unexpected end of stream inside markup structure")
+                }
+                return
+            }
+            u = u_after
         }
     }
 

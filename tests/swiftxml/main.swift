@@ -1,4 +1,3 @@
-import XMLTests
 import Glibc
 
 let test_cases:[(String, [Token])] =

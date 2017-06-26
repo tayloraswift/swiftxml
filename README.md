@@ -1,9 +1,10 @@
 # SwiftXML
 
+[![Platforms](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://swift.org/)
 [![Build](https://travis-ci.org/kelvin13/swiftxml.svg?branch=master)](https://travis-ci.org/kelvin13/swiftxml)
 [![Issues](https://img.shields.io/github/issues/kelvin13/swiftxml.svg)](https://github.com/kelvin13/swiftxml/issues?state=open)
 [![Language](https://img.shields.io/badge/version-swift_4-ffa020.svg)](https://swift.org/)
-[![License](https://img.shields.io/badge/license-GPL3-ff3079.svg)](https://github.com/kelvin13/swiftxml/blob/master/LICENSE.gpl3)
+[![License](https://img.shields.io/badge/license-GPL3-ff3079.svg)](https://github.com/kelvin13/swiftxml/blob/master/COPYING)
 [![Queen](https://img.shields.io/badge/taylor-swift-e030ff.svg)](https://www.google.com/search?q=where+is+ts6&oq=where+is+ts6)
 
 **Lightweight XML parsing in *pure* Swift 4. No Foundation. No dependencies.**

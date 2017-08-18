@@ -15,7 +15,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-import Glibc
+#if os(Linux)
+    import Glibc
+#elseif os(OSX)
+    import Darwin
+#else
+    fatalError("unsupported OS")
+#endif
 
 public
 protocol XMLParser

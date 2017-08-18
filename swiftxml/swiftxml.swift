@@ -19,8 +19,6 @@
     import Glibc
 #elseif os(OSX)
     import Darwin
-#else
-    fatalError("unsupported OS")
 #endif
 
 public
